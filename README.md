@@ -58,7 +58,7 @@ Follow these steps when working on the project:
 
 4. **Create a Pull Request**
    - Go to the repository on GitHub/GitLab and create a PR from your branch to `main`
-   - Reference the JIRA ticket in the PR title or description (e.g., "TEXPR-123: Add feature X")
+   - Reference the JIRA ticket in the PR title or description (e.g., "MALOCHE-8: Add README")
    - Request code review from teammates
    - Ensure CI/tests pass before merging
 
@@ -66,3 +66,6 @@ Follow these steps when working on the project:
    - Once your PR is linked in the title/description, JIRA should automatically detect the PR
    - Upon merge, the ticket status may update automatically (depends on your JIRA webhook setup)
    - Verify your ticket is updated to the correct status (Done/Closed)
+
+
+
