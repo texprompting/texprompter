@@ -67,5 +67,7 @@ Follow these steps when working on the project:
    - Upon merge, the ticket status may update automatically (depends on your JIRA webhook setup)
    - Verify your ticket is updated to the correct status (Done/Closed)
 
+---
+test 3
 
 
