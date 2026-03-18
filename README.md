@@ -34,3 +34,35 @@ Once the installation finishes, activate it just like a normal Conda environment
 ``` Bash
 conda activate shared_project_env
 ``` 
+
+
+
+## Contributing Guide
+
+### Workflow for Contributors
+
+Follow these steps when working on the project:
+
+1. **Clone or Pull the Repository**
+   - If you're new: `git clone <repo-url>` and follow the Installation Guide above
+   - If you already have it: `git pull origin main` to get the latest changes
+
+2. **Create a New Branch for Your Ticket**
+   - Pull the latest main: `git pull origin main`
+   - Create a new branch named after your ticket (e.g., `git checkout -b TICKET-ID-short-description`)
+   - Use the format: `TICKET-ID-short-description` (kebab-case)
+
+3. **Work on Your Changes**
+   - Make your commits with clear, descriptive messages
+   - Push your branch regularly: `git push origin TICKET-ID-short-description`
+
+4. **Create a Pull Request**
+   - Go to the repository on GitHub/GitLab and create a PR from your branch to `main`
+   - Reference the JIRA ticket in the PR title or description (e.g., "TEXPR-123: Add feature X")
+   - Request code review from teammates
+   - Ensure CI/tests pass before merging
+
+5. **JIRA Integration** *(automatic)*
+   - Once your PR is linked in the title/description, JIRA should automatically detect the PR
+   - Upon merge, the ticket status may update automatically (depends on your JIRA webhook setup)
+   - Verify your ticket is updated to the correct status (Done/Closed)
