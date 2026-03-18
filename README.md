@@ -10,22 +10,27 @@ Please follow these steps to set up your environment:
 Step 1: Install conda-lock in your base environment
 You only need to do this once on your machine. Open your terminal (or Anaconda Prompt on Windows) and run:
 
-Bash
+``` Bash
 conda install -c conda-forge conda-lock
+```
 Step 2: Navigate to the project folder
 Make sure you have pulled the latest code and use your terminal to navigate into the directory containing the conda-lock.yml file.
 
-Bash
+``` Bash
 cd path/to/the/project/folder
+```
+
 Step 3: Install the locked environment
 Run the following command. conda-lock will automatically detect your operating system and install the exact matching dependencies:
 
-Bash
+``` Bash
 conda-lock install --name texprompting conda-lock.yml
+``` 
 (Note: If you want to use a different name for your local environment, you can change shared_project_env to whatever you prefer).
 
 Step 4: Activate your new environment
 Once the installation finishes, activate it just like a normal Conda environment:
 
-Bash
+``` Bash
 conda activate shared_project_env
+``` 
