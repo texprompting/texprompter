@@ -32,7 +32,7 @@ Step 4: Activate your new environment
 Once the installation finishes, activate it just like a normal Conda environment:
 
 ``` Bash
-conda activate shared_project_env
+conda activate texprompting
 ``` 
 
 
