@@ -61,11 +61,11 @@ Follow these steps when working on the project:
    - Reference the JIRA ticket in the PR title or description (e.g., "MALOCHE-8: Add README")
    - Request code review from teammates
    - Ensure CI/tests pass before merging
+   - There will be a random Reviewer assigned who needs to review and Merge the Code. 
 
-5. **JIRA Integration** *(automatic)*
+5. **JIRA Integration**
    - Once your PR is linked in the title/description, JIRA should automatically detect the PR
-   - Upon merge, the ticket status may update automatically (depends on your JIRA webhook setup)
-   - Verify your ticket is updated to the correct status (Done/Closed)
+   - A new Subtask is created for the Review. Assign the same Reviewer as in Github to the Subtask
 
 
 
