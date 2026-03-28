@@ -1,0 +1,53 @@
+{
+  "col_names_used": "SALBP-1 to ILP (integer Linear Programming) Formulation",
+  "parameters": [
+    {
+      "symbol": "T",
+      "description": "Set of n tasks, t \\in T"
+    },
+    {
+      "symbol": "v_t",
+      "description": "Processing time required for task t"
+    },
+    {
+      "symbol": "S",
+      "description": "Set of m-bar stations s \\in S = {0..m-bar-1}, (m-bar is an upper bound for the number of stations needed)"
+    },
+    {
+      "symbol": "P = (T,E)",
+      "description": "Precedence graph (cycle-free) containing an edge (t_1, t_2) \\in E \\subseteq T^2$ iff t_1 has to be executed before t_2"
+    },
+    {
+      "symbol": "c",
+      "description": "Cycle time (max. amount of time a station has to execute all assigned tasks)"
+    }
+  ],
+  "variables": [
+    {
+      "variable": "x_ts",
+      "meaning": "1 if task t is assigned to station s, 0 else"
+    },
+    {
+      "variable": "y_s",
+      "meaning": "1 if station s is used, 0 else"
+    }
+  ],
+  "minimizing_problem": "Integer Linear Programming Formulation",
+  "objective_function": "min sum_{s} s * y_s (1.1)",
+  "constraint_functions": [
+    "sum_{s \\in S} x_{ts} = 1 for all t \\in T (1.2)",
+    "sum_{t \\in T} v_t * x_{ts} <= c * y_s for all s \\in S (1.3)",
+    "sum_{s \\in S} s * x_{ts} <= sum_{s \\in S} s * x_{t's} for all (t,t') \\in E (1.4)",
+    "y_s >= y_{s+1} for all s \\in S \\\\ {m-bar-1} (1.5)",
+    "x_{ts}, y_s \\in {0,1} for all t \\in T, s \\in S (1.6)"
+  ],
+  "explanation_of_ILP": [
+    "(1.1) Objective: Minimize the total number of stations used and break symmetries (using earlier stations costs less, cf. (1.5)).",
+    "(1.2) Every task is assigned to exactly one station.",
+    "(1.3) Every station adheres to the cycle time.",
+    "(1.4) Every precedence relation is respected. (Every preceding task is assigned to an earlier or the same station as each of its succeeding tasks.)",
+    "(1.5) The stations used are consecutive, i.e., no intermediate station is empty. To minimize the objective, this constraint is not necessary. However, it is symmetry breaking and can thus help the ILP solver to finish faster. If the unweighted objective is used (w/o s as coefficient), it ensures that the stations used in the solution are numbered consecutively.",
+    "(1.6) All variables are binary."
+  ],
+  "readable_documentation": "## SALBP-1 to ILP (integer Linear Programming) Formulation\\n\\nParameters\\n- T: Set of n tasks\\n- v_t: Processing time\\n- S: Set of stations\\n- P: Precedence graph\\n- c: Cycle time\\n\\nVariables\\n- x_ts: Task-to-station assignment\\n- y_s: Station usage\\n\\nInteger Linear Programming Formulation\\nMinimize: sum of s * y_s\\nSubject to:\\n1. Each task assigned once.\\n2. Cycle time limit per station.\\n3. Precedence constraints observed.\\n4. Consecutive station usage.\\n5. Binary constraints on variables.\\n\\nExplanation:\\nThe model optimizes line balancing by minimizing station indices while ensuring workload doesn't exceed cycle time and tasks follow the required production sequence. Symmetry breaking constraints (y_s >= y_{s+1}) are included to improve solver performance."
+}
