@@ -137,6 +137,7 @@ def get_input_data(
 	payload: dict[str, Any] = {
 		"source": {
 			"csv_file_name": csv_path.name,
+			"csv_file_path": str(csv_path),
 			"num_preview_rows": preview_rows,
 		},
 		"shape": {
@@ -148,5 +149,6 @@ def get_input_data(
 		"schema_mapping": schema_mapping,
 		"input_schema": _build_input_schema(columns, dtype_mapping, schema_mapping),
 		"sample_data": _format_sample_data(df, preview_rows),
+
 	}
 	return payload

@@ -142,33 +142,19 @@ try:
 
 
     system_message = (
-        "You are an expert Operations Research engineer and senior Python developer specialized in PuLP. "
-        "Your single task is to convert a given mathematical MILP formulation into a correct, runnable, and well-structured Python PuLP script. "
-        "Use only the provided problem information and tools. Do not invent missing business assumptions.\n\n"
-        "REQUIRED WORKFLOW:\n"
-        "1. First call the context tool calls in the following order:\n"
-        "   - get_mathematical_model\n"
-        "   - get_input_schema_payload\n"
-        "2. Translate sets, indices, parameters, objective, and constraints exactly from the mathematical formulation.\n"
-        "3. Build executable PuLP code including: imports, data loading/preparation, index construction, parameter dictionaries, variable declarations, objective, constraints, solve call, and result extraction.\n"
-        "4. Ensure the model remains linear and mixed-integer where required (binary/integer/continuous domains and bounds).\n"
-        "5. Add concise comments only where logic is non-trivial.\n\n"
-        "CORRECTNESS RULES:\n"
-        "- Preserve all units and index mappings from the formulation.\n"
-        "- Never drop constraints.\n"
-        "- Never use nonlinear operations in objective/constraints.\n"
-        "- Use deterministic naming for variables and constraints.\n"
-        "- Include solver status handling for optimal, infeasible, unbounded, and other statuses.\n"
-        "- If data is insufficient to implement a required term, clearly state what is missing instead of guessing.\n\n"
-        "OUTPUT REQUIREMENTS:\n"
-        "- Produce a complete Python script that can run as a standalone file.\n"
-        "- Script must include a main execution path and print key outputs (status, objective value, decision variables).\n"
-        "- Ensure syntax is valid Python 3.\n"
-        "- Finish by returning the required structured output in the enforced response format.\n\n"
-        "STYLE REQUIREMENTS:\n"
-        "- Keep code clean and production-like.\n"
-        "- Prefer explicit loops/comprehensions that are easy to audit.\n"
-        "- Avoid placeholders like TODO, pass, or pseudo-code."
+        "You are a PuLP MILP coding agent. Convert the provided mathematical model into runnable Python PuLP code. "
+        "Use only the provided tool data and do not invent missing assumptions.\n\n"
+        "Required workflow (strict):\n"
+        "1. Call get_mathematical_model first.\n"
+        "2. Call get_input_schema_payload second.\n"
+        "3. Implement the full PuLP model: imports, data prep, sets/indices, parameters, variables, objective, constraints, solve, and result printing.\n\n"
+        "Rules:\n"
+        "- Keep the model linear and respect variable domains/bounds.\n"
+        "- Do not omit constraints from the mathematical model.\n\n"
+        "ABSOLUTE OUTPUT REQUIREMENT:\n"
+        "Your final response MUST be a CodeModel tool call and nothing else. "
+        "You MUST provide all fields exactly: code (str), missing_info (str), successful_implementation (bool). "
+        "If you do not use the CodeModel tool call, the response is invalid."
     )
 
     # Use LangChain's create_agent function as recommended, and enforce structured output
@@ -179,7 +165,7 @@ try:
         response_format=CodeModel
     )
 
-    user_input = "Generate the Python PuLP code for the optimization problem. The mathmatical model are provided in the get_mathematical_model tool which you are REQUIRED to call first. The input schema and data information is provided in the get_input_schema_payload tool which you are REQUIRED to call second. Follow the required workflow and correctness rules strictly, and return the complete code in the specified structured format trough calling the CodeModel tool (THIS IS ABSOLUTELY REQUIRED) (Output should be a JSON with fields: code, missing_info, successful_implementation)"   
+    user_input = "Generate the Python PuLP code for the optimization problem. The mathmatical model are provided in the get_mathematical_model tool which you are REQUIRED to call first. The input schema and data information is provided in the get_input_schema_payload tool which you are REQUIRED to call second. Follow the required workflow and correctness rules strictly, and return the complete code in the specified structured format trough calling the CodeModel tool (THIS IS ABSOLUTELY REQUIRED) (Output should be a JSON with fields: code, successful_implementation)"   
     print(f"Sending prompt: {user_input}")
     
     messages = [{"role": "user", "content": user_input}]
@@ -253,7 +239,7 @@ try:
              print(f"\nAttempt {attempt + 1} did not return the correct tool call. Retrying...")
              # Let's feed the conversation history back in, appending a strict instruction
              messages = response['messages'] + [
-                 {"role": "user", "content": "You failed to output using the required CodeModel format. Please output ONLY by calling the 'CodeModel' tool with all required fields: code, missing_info, successful_implementation."}
+                 {"role": "user", "content": "You failed to output using the required CodeModel format. Please output ONLY by calling the 'CodeModel' tool with all required fields: code, successful_implementation."}
              ]
              
     else:
