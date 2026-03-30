@@ -121,19 +121,6 @@ Typical data includes:
 
 ---
 
-
-## Use Cases
-
-This dataset can be used for:
-
-- Anomaly detection in industrial systems
-- Predictive maintenance
-- Process monitoring and diagnostics
-- Machine learning on multivariate time-series data
-- Cyber-physical systems research
-
----
-
 ## Acknowledgements
 
 This dataset originates from:
@@ -152,10 +139,3 @@ It has been used in research projects such as **IMPROVE**, funded by the Europea
 This dataset is publicly available under [these terms](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
 Users are responsible for complying with the original data provider’s terms. For commercial use, please consult the original dataset owners.
-
----
-
-## Notes
-
-- This repository is intended for educational and research use only.
-- Proper attribution is required when using this dataset in publications or projects.
