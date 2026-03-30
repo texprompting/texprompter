@@ -69,3 +69,73 @@ Follow these steps when working on the project:
 
 
 
+
+# Versatile Production System (VPS) Dataset
+
+## Overview
+
+This repository contains process data from the **Versatile Production System (VPS)**, a modular smart factory demonstrator from the SmartFactory OWL environment. The system is used in industrial research for applications such as **machine learning, anomaly detection, process monitoring, and alarm management**.
+
+The VPS simulates an end-to-end production workflow for popcorn processing and packaging using interconnected industrial modules.
+
+---
+
+## System Description
+
+The VPS consists of five main modules:
+
+### Delivery Module
+Raw corn is delivered into the system via conveyor belt and transported into a stainless steel funnel. A pressure conveyor moves the material into storage.
+
+### Storage Module
+Acts as a buffer for raw material. When sufficient corn is available and downstream capacity allows, material is pneumatically transferred to dosing.
+
+### Dosing Module
+A controlled amount of corn is measured using a load cell and dosing screw mechanism. The measured portion is then transferred to the filling module.
+
+### Filling Module
+Bottles are processed on a rotary table through multiple stages:
+
+- Cleaning using compressed air  
+- Filling with corn  
+- Lid placement using a pneumatic gripper  
+- Screwing on lids  
+- Quality inspection using a camera system  
+
+### Production Module
+Corn is heated and expanded into popcorn. The product is collected into cups until a weight threshold is reached. Excess popcorn is redirected to an overflow container.
+
+---
+
+## Dataset Content
+
+The dataset contains time-series process data collected from sensors and actuators across the VPS modules.
+
+Typical data includes:
+- Sensor readings (e.g., weight, pressure, levels)
+- Actuator states (e.g., motors, valves, conveyors)
+- Process states and cycle information
+- Control signals from the automation system
+
+> Note: The exact signals and file names may depend on the specific experiment export.
+
+---
+
+## Acknowledgements
+
+This dataset originates from:
+
+- inIT – Institute Industrial IT  
+- Ostwestfalen-Lippe University of Applied Sciences  
+
+The VPS is part of the **SmartFactory OWL** research infrastructure.
+
+It has been used in research projects such as **IMPROVE**, funded by the European Union’s Horizon 2020 research and innovation programme (Grant Agreement No. 678867).
+
+---
+
+## License / Usage
+
+This dataset is publicly available under [these terms](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+
+Users are responsible for complying with the original data provider’s terms. For commercial use, please consult the original dataset owners.
