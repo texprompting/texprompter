@@ -1,1 +1,1 @@
-$\max \sum_{i=1}^{n} P_i x_i$
+min\quad f(x) = \sum_{i=1}^{n} c_i x_i
