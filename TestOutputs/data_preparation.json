@@ -1,0 +1,49 @@
+{
+    "assumptions": [],
+    "data_loading": "df = pd.read_csv('data.csv')",
+    "data_structures_ready": true,
+    "full_script": "import pandas as pd; df = pd.read_csv('data.csv'); I = df['item_id'].unique(); T = df['time_period'].unique(); c = df.groupby('item_id')['cost'].sum().to_dict(); d = df.groupby('time_period')['demand'].sum().to_dict()",
+    "imports": "import pandas as pd",
+    "mapping_explanation": [
+        "Mathematical symbols are mapped to Python data structures as follows: c_i -> c, d_t -> d",
+        "Indices are consistent between sets and parameters"
+    ],
+    "parameters": [
+        {
+            "description": "Cost of item i",
+            "python_representation": "c = df.groupby('item_id')['cost'].sum().to_dict()",
+            "source_columns": [
+                "item_id",
+                "cost"
+            ],
+            "symbol": "c_i"
+        },
+        {
+            "description": "Demand at time period t",
+            "python_representation": "d = df.groupby('time_period')['demand'].sum().to_dict()",
+            "source_columns": [
+                "time_period",
+                "demand"
+            ],
+            "symbol": "d_t"
+        }
+    ],
+    "preprocessing_steps": [
+        "Get mathematical model payload from generated outputs and reference model",
+        "Preview CSV to understand the structure and content of the dataset"
+    ],
+    "sets": [
+        {
+            "description": "Set of items",
+            "name": "I",
+            "python_representation": "I = df['item_id'].unique()",
+            "source_column": "item_id"
+        },
+        {
+            "description": "Set of time periods",
+            "name": "T",
+            "python_representation": "T = df['time_period'].unique()",
+            "source_column": "time_period"
+        }
+    ]
+}
