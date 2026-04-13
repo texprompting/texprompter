@@ -1,30 +1,57 @@
-import pandas as pd
-from pulp import LpMaximize, LpProblem, lpSum, LpVariable, value
+from pulp import LpMaximize, LpProblem, lpSum, LpVariable
 
-df = pd.read_csv('texprompter/data/optimization_pipeline_test_easy.csv')
-model = LpProblem(name="production-optimization", sense=LpMaximize)
-product_ids = df['Product_ID']
-x = LpVariable.dicts("Quantity", product_ids, lowBound=0, upBound=None, cat='Integer')
-model += lpSum([df.loc[i, 'Profit_Per_Unit'] * x[product_ids[i]] for i in range(len(product_ids))])
-machine_a_hours = df['Machine_A_Hours_Req']
-machine_b_hours = df['Machine_B_Hours_Req']
-labor_hours = df['Labor_Hours_Req']
-raw_material_units = df['Raw_Material_Units_Req']
-model += lpSum([machine_a_hours[i] * x[product_ids[i]] for i in range(len(product_ids))]) <= 1000.0
-model += lpSum([machine_b_hours[i] * x[product_ids[i]] for i in range(len(product_ids))]) <= 1000.0
-model += lpSum([labor_hours[i] * x[product_ids[i]] for i in range(len(product_ids))]) <= 1500.0
-model += lpSum([raw_material_units[i] * x[product_ids[i]] for i in range(len(product_ids))]) <= 5000.0
-min_production_requirements = df['Min_Production_Requirement']
-max_market_demands = df['Max_Market_Demand']
-for i in range(len(product_ids)):
-    model += x[product_ids[i]] >= min_production_requirements[i]
-    model += x[product_ids[i]] <= max_market_demands[i]
-status = model.solve()
-print(f"Status: {model.status}")
-if status == 1:
-    print("Optimal solution found.")
-    print(f"Objective value: {value(model.objective)}")
-    for v in x.values():
-        print(f"{v.name}: {v.value()}")
-else:
-    print("No optimal solution found.")
+def get_input_schema_payload():
+    return {
+        "n": 5,
+        "m": 3,
+        "profits": [10, 20, 30, 40, 50],
+        "weights": [1, 2, 3, 4, 5],
+        "capacity": 15
+    }
+
+
+def get_requested_output_schema():
+    return {
+        "objective": float,
+        "selected_items": list,
+        "total_profit": float,
+        "total_weight": float
+    }
+
+
+def get_mathematical_model(input_payload):
+    model = LpProblem(name="knapsack-problem", sense=LpMaximize)
+    
+    # Initialize the problem variables
+    item_vars = LpVariable.dicts("Item", range(input_payload["n"]), lowBound=0, upBound=1, cat='Integer')
+    
+    # Add the objective
+    model += lpSum([input_payload["profits"][i] * item_vars[i] for i in range(input_payload["n"])])
+    
+    # Add constraint
+    model += lpSum([input_payload["weights"][i] * item_vars[i] for i in range(input_payload["n"])]) <= input_payload["capacity"]
+    
+    # Solve the problem
+    status = model.solve()
+    
+    # Get the selected items
+    selected_items = [i for i in range(input_payload["n"]) if item_vars[i].varValue]
+    
+    return {
+        "objective": model.objective.value(),
+        "selected_items": selected_items,
+        "total_profit": sum([input_payload["profits"][i] for i in selected_items]),
+        "total_weight": sum([input_payload["weights"][i] for i in selected_items])
+    }
+
+
+def main():
+    input_schema = get_input_schema_payload()
+    result = get_mathematical_model(input_schema)
+    output_schema = get_requested_output_schema()
+    
+    print(f"Result: {json.dumps(result, indent=4)}")
+    print(f"Output Schema: {output_schema}")
+
+if __name__ == "__main__":
+    main()

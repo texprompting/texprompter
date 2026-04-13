@@ -36,6 +36,34 @@ conda activate texprompting
 ``` 
 
 
+## LangGraph Scaffold
+
+The current implementation uses a LangGraph state machine with four agent nodes:
+
+1. Use Case Agent: analyzes CSV and selects the best OR use case.
+2. Modeling Agent: builds MILP pseudo-LaTeX objective and constraints.
+3. Preprocessing Agent: generates csv->input-schema mapping contract and script.
+4. Scripting Agent: generates runnable PuLP code and output schema.
+
+Shared contracts are defined in `schemas/basemodels.py` and the graph orchestrator is implemented in `orchestrator/pipeline.py`.
+
+
+## Running The Pipeline
+
+Run the LangGraph pipeline:
+
+```bash
+python -m orchestrator.pipeline 
+```
+
+Default input CSV is `data/optimization_pipeline_test_easy.csv`. Generated artifacts are written to `TestOutputs/`.
+
+
+## Scaffold Outline (apart from `agents/`)
+
+- `orchestrator/pipeline.py`: graph wiring, state transitions, and node error handling.
+- `schemas/basemodels.py`: all inter-agent message contracts.
+
 
 ## Contributing Guide
 
