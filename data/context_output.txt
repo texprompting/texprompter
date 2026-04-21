@@ -1,0 +1,18 @@
+
+Use Case:
+production_optimization
+
+Objective:
+minimize_energy_consumption
+
+Decision Variables:
+['Aspirator.O_xOn', 'BeltConveyor.O_xOn']
+
+Relevant Columns:
+['SiloFull', 'SiloMinFull', 'FunnelBlocked']
+
+Statistics:
+energy_efficiency_statistics
+
+Reasoning:
+The optimization use case is energy_efficiency because the production process involves high energy consumption. The objective is to minimize_energy_consumption by optimizing the decision variables Aspirator.O_xOn and BeltConveyor.O_xOn. The relevant columns are SiloFull, SiloMinFull, and FunnelBlocked.
