@@ -621,7 +621,7 @@ def initialize_node(state: PipelineStateDict) -> PipelineStateDict:
                         "shape": current_state.input_schema_payload.get("shape", {}),
                     },
                 )
-                _mlflow_log_metrics({"duration_seconds": float(time.time() - started_at)})
+                _mlflow_log_metrics({"initialize_duration_seconds": float(time.time() - started_at)})
                 _mlflow_log_json("initialize/input_schema_payload.json", current_state.input_schema_payload)
                 _log_stage_diagnostics_to_mlflow(
                     stage_name="initialize",
