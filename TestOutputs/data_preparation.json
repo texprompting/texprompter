@@ -1,49 +1,91 @@
 {
-    "assumptions": [],
-    "data_loading": "df = pd.read_csv('data.csv')",
+    "assumptions": [
+        "Total molding time (T_molding) and total assembly time (T_assembly) were not provided in the CSV data; these are assumed as constants in the script and should be updated with actual business values."
+    ],
+    "data_loading": "df = pd.read_csv('production_data.csv')",
     "data_structures_ready": true,
-    "full_script": "import pandas as pd; df = pd.read_csv('data.csv'); I = df['item_id'].unique(); T = df['time_period'].unique(); c = df.groupby('item_id')['cost'].sum().to_dict(); d = df.groupby('time_period')['demand'].sum().to_dict()",
+    "full_script": "import pandas as pd\n\n# Load data\ndf = pd.read_csv('production_data.csv')\n\n# 1. Define Sets\n# I: Set of all products\nI = df['Product_SKU'].unique().tolist()\n\n# 2. Define Parameters\n# p_i: Sale price per unit of product i\np = dict(zip(df['Product_SKU'], df['Sale_Price_Per_Unit']))\n\n# c_i: Material cost per unit of product i\nc = dict(zip(df['Product_SKU'], df['Material_Cost_Per_Unit']))\n\n# m_i: Molding time required per unit of product i\nm = dict(zip(df['Product_SKU'], df['Molding_Mins_Req']))\n\n# a_i: Assembly time required per unit of product i\na = dict(zip(df['Product_SKU'], df['Assembly_Mins_Req']))\n\n# Cap_max,i: Maximum market capacity for product i\ncap_max = dict(zip(df['Product_SKU'], df['Max_Market_Capacity']))\n\n# Global capacities (Constants not found in CSV, defined as assumptions)\nT_molding = 10000  # Total available molding time\nT_assembly = 10000 # Total available assembly time\n\n# Verify data structures\nprint(f\"Set I: {I}\")\nprint(f\"Parameter p (first 5): {list(p.items())[:5]}\")\nprint(f\"T_molding: {T_molding}\")\nprint(f\"T_assembly: {T_assembly}\")\n",
     "imports": "import pandas as pd",
     "mapping_explanation": [
-        "Mathematical symbols are mapped to Python data structures as follows: c_i -> c, d_t -> d",
-        "Indices are consistent between sets and parameters"
+        "The set I (products) is derived from the 'Product_SKU' column.",
+        "The sale price p_i is mapped from the 'Sale_Price_Per_Unit' column.",
+        "The material cost c_i is mapped from the 'Material_Cost_Per_Unit' column.",
+        "The molding time m_i is mapped from the 'Molding_Mins_Req' column.",
+        "The assembly time a_i is mapped from the 'Assembly_Mins_Req' column.",
+        "The market capacity Cap_max,i is mapped from the 'Max_Market_Capacity' column.",
+        "T_molding and T_assembly are scalar constants reflecting total resource availability."
     ],
     "parameters": [
         {
-            "description": "Cost of item i",
-            "python_representation": "c = df.groupby('item_id')['cost'].sum().to_dict()",
+            "description": "Sale price per unit of product i",
+            "python_representation": "p = dict(zip(df['Product_SKU'], df['Sale_Price_Per_Unit']))",
             "source_columns": [
-                "item_id",
-                "cost"
+                "Product_SKU",
+                "Sale_Price_Per_Unit"
+            ],
+            "symbol": "p_i"
+        },
+        {
+            "description": "Material cost per unit of product i",
+            "python_representation": "c = dict(zip(df['Product_SKU'], df['Material_Cost_Per_Unit']))",
+            "source_columns": [
+                "Product_SKU",
+                "Material_Cost_Per_Unit"
             ],
             "symbol": "c_i"
         },
         {
-            "description": "Demand at time period t",
-            "python_representation": "d = df.groupby('time_period')['demand'].sum().to_dict()",
+            "description": "Molding time required per unit of product i",
+            "python_representation": "m = dict(zip(df['Product_SKU'], df['Molding_Mins_Req']))",
             "source_columns": [
-                "time_period",
-                "demand"
+                "Product_SKU",
+                "Molding_Mins_Req"
             ],
-            "symbol": "d_t"
+            "symbol": "m_i"
+        },
+        {
+            "description": "Assembly time required per unit of product i",
+            "python_representation": "a = dict(zip(df['Product_SKU'], df['Assembly_Mins_Req']))",
+            "source_columns": [
+                "Product_SKU",
+                "Assembly_Mins_Req"
+            ],
+            "symbol": "a_i"
+        },
+        {
+            "description": "Maximum market capacity for product i",
+            "python_representation": "cap_max = dict(zip(df['Product_SKU'], df['Max_Market_Capacity']))",
+            "source_columns": [
+                "Product_SKU",
+                "Max_Market_Capacity"
+            ],
+            "symbol": "Cap_{max, i}"
+        },
+        {
+            "description": "Total available molding time",
+            "python_representation": "T_molding = 10000",
+            "source_columns": [],
+            "symbol": "T_{molding}"
+        },
+        {
+            "description": "Total available assembly time",
+            "python_representation": "T_assembly = 10000",
+            "source_columns": [],
+            "symbol": "T_{assembly}"
         }
     ],
     "preprocessing_steps": [
-        "Get mathematical model payload from generated outputs and reference model",
-        "Preview CSV to understand the structure and content of the dataset"
+        "Load the CSV file into a pandas DataFrame.",
+        "Extract unique values from 'Product_SKU' to define the product set I.",
+        "Create dictionaries for product-specific parameters (p_i, c_i, m_i, a_i, Cap_max,i) using 'Product_SKU' as the key.",
+        "Define the global resource constants T_molding and T_assembly as scalars."
     ],
     "sets": [
         {
-            "description": "Set of items",
+            "description": "Set of all products",
             "name": "I",
-            "python_representation": "I = df['item_id'].unique()",
-            "source_column": "item_id"
-        },
-        {
-            "description": "Set of time periods",
-            "name": "T",
-            "python_representation": "T = df['time_period'].unique()",
-            "source_column": "time_period"
+            "python_representation": "I = df['Product_SKU'].unique().tolist()",
+            "source_column": "Product_SKU"
         }
     ]
 }

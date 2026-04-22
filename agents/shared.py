@@ -36,10 +36,14 @@ def build_ollama_model(reasoning: bool = True) -> ChatOllama:
     if ollama_api_key and ollama_api_key != "your_api_key_here":
         headers["Authorization"] = f"Bearer {ollama_api_key}"
 
+    client_kwargs: dict[str, Any] = {"verify": False}
+    if headers:
+        client_kwargs["headers"] = headers
+
     return ChatOllama(
         base_url=ollama_base_url,
         model=os.getenv("OLLAMA_MODEL", "llama3.3:70b-instruct-q3_K_M"),
-        client_kwargs={"headers": headers} if headers else {},
+        client_kwargs=client_kwargs,
         reasoning=reasoning,
     )
 

@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from agents.sample_Mathematical_modeling import run_modeling_agent
-from agents.sample_Pulp_Coding_Agent import run_scripting_agent
-from agents.sample_preprocessing_agent import run_preprocessing_agent
-from agents.sample_use_case_agent import run_use_case_agent
-from schemas.basemodels import AgentError, PipelineState
+from schemas.basemodels import (
+    AgentError,
+    ModellingRecommendation,
+    PipelineState,
+    PreprocessingRecommendation,
+    ScriptingRecommendation,
+    UseCaseRecommendation,
+)
 
 
 class PipelineStateDict(TypedDict, total=False):
@@ -22,6 +33,258 @@ class PipelineStateDict(TypedDict, total=False):
     scripting: dict[str, Any] | None
     errors: list[dict[str, Any]]
     traces: list[str]
+
+
+_STREAM_AGENT_OUTPUT = False
+_STREAM_PIPELINE_PROGRESS = False
+
+
+def _emit_progress(message: str) -> None:
+    if _STREAM_PIPELINE_PROGRESS:
+        print(f"[pipeline] {message}", flush=True)
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _data_dir() -> Path:
+    return _project_root() / "data"
+
+
+def _test_outputs_dir() -> Path:
+    return _project_root() / "TestOutputs"
+
+
+def _resolve_csv_path(csv_file_path: str) -> Path:
+    csv_path = Path(csv_file_path)
+    if csv_path.is_absolute():
+        return csv_path
+
+    data_path = _data_dir() / csv_file_path
+    if data_path.exists():
+        return data_path
+
+    return (_project_root() / csv_file_path).resolve()
+
+
+def _read_text_if_exists(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def _run_agent_script(script_name: str, extra_env: dict[str, str] | None = None) -> None:
+    script_path = _project_root() / "agents" / script_name
+    if not script_path.exists():
+        raise FileNotFoundError(f"Agent script not found: {script_path}")
+
+    env = None
+    if extra_env:
+        env = os.environ.copy()
+        env.update(extra_env)
+
+    if _STREAM_AGENT_OUTPUT:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=str(script_path.parent),
+            check=False,
+            env=env,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"{script_name} failed with exit code {result.returncode}")
+        return
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=str(script_path.parent),
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        details = stderr or stdout or f"exit code {result.returncode}"
+        raise RuntimeError(f"{script_name} failed: {details}")
+
+
+def _load_csv_schema_payload(csv_file_path: Path, preview_rows: int) -> dict[str, Any]:
+    module_path = _data_dir() / "csv_to_input_scheme.py"
+    spec = importlib.util.spec_from_file_location("csv_to_input_scheme", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load schema module from {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    if not hasattr(module, "get_input_data"):
+        raise AttributeError("csv_to_input_scheme.py does not define get_input_data")
+
+    get_input_data = getattr(module, "get_input_data")
+    return get_input_data(csv_file_name=str(csv_file_path), preview_rows=preview_rows)
+
+
+def _infer_objective_direction(text: str) -> str:
+    lowered = text.lower()
+    if "min" in lowered:
+        return "min"
+    return "max"
+
+
+def run_use_case_agent(csv_file_path: str, preview_rows: int = 5) -> UseCaseRecommendation:
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+
+    context_module = importlib.import_module("agents.context_agent")
+    context_module.CSV_PATH = str(resolved_csv_path)
+    raw_output = context_module.run_context_agent()
+    if not isinstance(raw_output, dict):
+        raise ValueError("context_agent did not return a valid ContextRecommendation payload.")
+
+    objective = str(raw_output.get("objective", "")).strip()
+    return UseCaseRecommendation(
+        use_case_name=str(raw_output.get("use_case", "production_optimization")).strip(),
+        business_goal=objective or "Optimize production performance.",
+        objective_direction=_infer_objective_direction(objective),
+        objective_variable=objective or "production target",
+        decision_variables=[str(item) for item in raw_output.get("decision_variables", [])],
+        required_columns=[str(item) for item in raw_output.get("relevant_columns", [])],
+        constraints_to_consider=[],
+        assumptions=[],
+        rationale=str(raw_output.get("reasoning", "Generated by context_agent.")).strip(),
+    )
+
+
+def run_modeling_agent(
+    csv_file_path: str,
+    use_case: UseCaseRecommendation | None,
+    preview_rows: int = 5,
+) -> ModellingRecommendation:
+    del use_case
+    del preview_rows
+
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+
+    # Pass the chosen pipeline CSV to the subprocess so modelling uses the same dataset as the graph state.
+    _run_agent_script(
+        "Mathematical_modelling.py",
+        extra_env={"PIPELINE_CSV_PATH": str(resolved_csv_path)},
+    )
+
+    outputs_dir = _test_outputs_dir()
+    objective_function = _read_text_if_exists(outputs_dir / "llm_objective_function.md").strip()
+    constraints_text = _read_text_if_exists(outputs_dir / "llm_constraints.md")
+    readable_documentation = _read_text_if_exists(outputs_dir / "llm_output.md").strip()
+
+    if not objective_function:
+        raise ValueError("Mathematical_modelling.py did not produce llm_objective_function.md")
+
+    constraint_functions = [line.strip() for line in constraints_text.splitlines() if line.strip()]
+
+    with resolved_csv_path.open("r", encoding="utf-8") as csv_file:
+        header_line = csv_file.readline().strip()
+    col_names_used = [name.strip() for name in header_line.split(",") if name.strip()]
+
+    return ModellingRecommendation(
+        col_names_used=col_names_used,
+        parameters=[],
+        variables=[],
+        minimizing_problem=objective_function.lower().startswith("min"),
+        objective_function=objective_function,
+        constraint_functions=constraint_functions,
+        explanation_of_ILP=[
+            "Documentation was generated by Mathematical_modelling.py and persisted to TestOutputs."
+        ],
+        readable_documentation=readable_documentation or "# Model documentation not generated",
+    )
+
+
+def run_preprocessing_agent(
+    csv_file_path: str,
+    use_case: UseCaseRecommendation | None,
+    modelling: ModellingRecommendation | None,
+    preview_rows: int = 5,
+) -> PreprocessingRecommendation:
+    del use_case
+    del modelling
+
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+
+    # Removed the stale file-alias workaround and pass the real CSV path directly to avoid cross-run data leakage.
+    _run_agent_script(
+        "Data_Processor_Agent.py",
+        extra_env={"PIPELINE_CSV_PATH": str(resolved_csv_path)},
+    )
+
+    outputs_dir = _test_outputs_dir()
+    preparation_path = outputs_dir / "data_preparation.json"
+    if not preparation_path.exists():
+        raise ValueError("Data_Processor_Agent.py did not produce data_preparation.json")
+
+    payload = json.loads(preparation_path.read_text(encoding="utf-8"))
+    mapping_notes = [str(item) for item in payload.get("mapping_explanation", [])]
+    mapping_notes.extend(str(item) for item in payload.get("preprocessing_steps", []))
+
+    return PreprocessingRecommendation(
+        input_schema_payload=_load_csv_schema_payload(resolved_csv_path, preview_rows),
+        mapper_script=str(payload.get("full_script", "")).strip(),
+        mapping_notes=mapping_notes,
+        assumptions=[str(item) for item in payload.get("assumptions", [])],
+    )
+
+
+def run_scripting_agent(
+    csv_file_path: str,
+    modelling: ModellingRecommendation | None,
+    preprocessing: PreprocessingRecommendation | None,
+    preview_rows: int = 5,
+) -> ScriptingRecommendation:
+    del modelling
+    del preprocessing
+    del preview_rows
+
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+
+    # Pass the chosen CSV path to scripting so input-schema extraction is consistent with the pipeline invocation.
+    _run_agent_script(
+        "Pulp_Coding_Agent.py",
+        extra_env={"PIPELINE_CSV_PATH": str(resolved_csv_path)},
+    )
+
+    generated_code_path = _test_outputs_dir() / "generated_pulp_model.py"
+    if not generated_code_path.exists():
+        raise ValueError("Pulp_Coding_Agent.py did not produce generated_pulp_model.py")
+
+    code = generated_code_path.read_text(encoding="utf-8")
+    additional_info: list[str] = []
+    successful_implementation = True
+    try:
+        compile(code, str(generated_code_path), "exec")
+    except SyntaxError as syntax_error:
+        successful_implementation = False
+        additional_info.append(f"Generated code has syntax errors: {syntax_error}")
+
+    return ScriptingRecommendation(
+        code=code,
+        output_schema={
+            "solution_status": "str",
+            "objective_value": "float",
+            "decision_variables": "dict[str, float]",
+            "solver_message": "str",
+        },
+        successful_implementation=successful_implementation,
+        missing_info=[],
+        additional_info=additional_info,
+    )
 
 
 def _append_trace(state: PipelineState, trace: str) -> None:
@@ -48,15 +311,18 @@ def use_case_node(state: PipelineStateDict) -> PipelineStateDict:
     if current_state.status == "error":
         return current_state.model_dump()
 
+    _emit_progress("use_case:start")
     try:
         current_state.use_case = run_use_case_agent(
             csv_file_path=current_state.csv_file_path,
             preview_rows=current_state.preview_rows,
         )
         _append_trace(current_state, "use_case:ok")
+        _emit_progress("use_case:ok")
     except Exception as error:
         _set_error(current_state, "use_case_agent", error)
         _append_trace(current_state, "use_case:error")
+        _emit_progress(f"use_case:error - {error}")
 
     return current_state.model_dump()
 
@@ -66,6 +332,7 @@ def modeling_node(state: PipelineStateDict) -> PipelineStateDict:
     if current_state.status == "error":
         return current_state.model_dump()
 
+    _emit_progress("modeling:start")
     try:
         current_state.modelling = run_modeling_agent(
             csv_file_path=current_state.csv_file_path,
@@ -73,9 +340,11 @@ def modeling_node(state: PipelineStateDict) -> PipelineStateDict:
             preview_rows=current_state.preview_rows,
         )
         _append_trace(current_state, "modeling:ok")
+        _emit_progress("modeling:ok")
     except Exception as error:
         _set_error(current_state, "modeling_agent", error)
         _append_trace(current_state, "modeling:error")
+        _emit_progress(f"modeling:error - {error}")
 
     return current_state.model_dump()
 
@@ -85,6 +354,7 @@ def preprocessing_node(state: PipelineStateDict) -> PipelineStateDict:
     if current_state.status == "error":
         return current_state.model_dump()
 
+    _emit_progress("preprocessing:start")
     try:
         current_state.preprocessing = run_preprocessing_agent(
             csv_file_path=current_state.csv_file_path,
@@ -93,9 +363,11 @@ def preprocessing_node(state: PipelineStateDict) -> PipelineStateDict:
             preview_rows=current_state.preview_rows,
         )
         _append_trace(current_state, "preprocessing:ok")
+        _emit_progress("preprocessing:ok")
     except Exception as error:
         _set_error(current_state, "preprocessing_agent", error)
         _append_trace(current_state, "preprocessing:error")
+        _emit_progress(f"preprocessing:error - {error}")
 
     return current_state.model_dump()
 
@@ -105,6 +377,7 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
     if current_state.status == "error":
         return current_state.model_dump()
 
+    _emit_progress("scripting:start")
     try:
         current_state.scripting = run_scripting_agent(
             csv_file_path=current_state.csv_file_path,
@@ -114,21 +387,56 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
         )
         if current_state.scripting.successful_implementation:
             _append_trace(current_state, "scripting:ok")
+            _emit_progress("scripting:ok")
         else:
             detail = "; ".join(current_state.scripting.additional_info).strip()
             if not detail:
                 detail = "Scripting agent returned successful_implementation=False."
             _set_error(current_state, "scripting_agent", ValueError(detail))
             _append_trace(current_state, "scripting:invalid")
+            _emit_progress(f"scripting:invalid - {detail}")
     except Exception as error:
         _set_error(current_state, "scripting_agent", error)
         _append_trace(current_state, "scripting:error")
+        _emit_progress(f"scripting:error - {error}")
 
     return current_state.model_dump()
 
 
 def _status_router(state: PipelineStateDict) -> str:
     return "stop" if state.get("status") == "error" else "continue"
+
+
+def _run_pipeline_with_streaming(graph: Any, initial_state: PipelineState) -> PipelineState:
+    seen_traces = 0
+    seen_errors = 0
+    final_state: dict[str, Any] = initial_state.model_dump()
+
+    print("[pipeline] start", flush=True)
+    for state_update in graph.stream(initial_state.model_dump(), stream_mode="values"):
+        if not isinstance(state_update, Mapping):
+            continue
+
+        state_dict = dict(state_update)
+        final_state = state_dict
+
+        traces = state_dict.get("traces", [])
+        if isinstance(traces, list):
+            for trace in traces[seen_traces:]:
+                print(f"[pipeline] {trace}", flush=True)
+            seen_traces = len(traces)
+
+        errors = state_dict.get("errors", [])
+        if isinstance(errors, list) and len(errors) > seen_errors:
+            for error in errors[seen_errors:]:
+                if isinstance(error, dict):
+                    agent_name = str(error.get("agent_name", "unknown_agent"))
+                    message = str(error.get("message", "unknown error"))
+                    print(f"[pipeline] error in {agent_name}: {message}", flush=True)
+            seen_errors = len(errors)
+
+    print("[pipeline] done", flush=True)
+    return PipelineState.model_validate(final_state)
 
 
 def build_pipeline_graph() -> Any:
@@ -172,14 +480,29 @@ def build_pipeline_graph() -> Any:
 def run_pipeline(
     csv_file_path: str = "optimization_pipeline_test_easy.csv",
     preview_rows: int = 5,
+    stream_pipeline_output: bool = False,
 ) -> PipelineState:
+    global _STREAM_AGENT_OUTPUT, _STREAM_PIPELINE_PROGRESS
+
     graph = build_pipeline_graph()
     initial_state = PipelineState(
         csv_file_path=csv_file_path,
         preview_rows=preview_rows,
     )
-    result = graph.invoke(initial_state.model_dump())
-    return PipelineState.model_validate(result)
+
+    previous_stream_agent_output = _STREAM_AGENT_OUTPUT
+    previous_stream_pipeline_progress = _STREAM_PIPELINE_PROGRESS
+    _STREAM_AGENT_OUTPUT = stream_pipeline_output
+    _STREAM_PIPELINE_PROGRESS = stream_pipeline_output
+    try:
+        if stream_pipeline_output:
+            return _run_pipeline_with_streaming(graph, initial_state)
+
+        result = graph.invoke(initial_state.model_dump())
+        return PipelineState.model_validate(result)
+    finally:
+        _STREAM_AGENT_OUTPUT = previous_stream_agent_output
+        _STREAM_PIPELINE_PROGRESS = previous_stream_pipeline_progress
 
 
 def _positive_int(value: str) -> int:
@@ -205,6 +528,11 @@ def parse_cli_args() -> argparse.Namespace:
         default=5,
         help="Number of rows loaded for the quick CSV preview.",
     )
+    parser.add_argument(
+        "--stream-pipeline-output",
+        action="store_true",
+        help="Stream per-node pipeline progress and agent output while running.",
+    )
     return parser.parse_args()
 
 
@@ -213,5 +541,6 @@ if __name__ == "__main__":
     final_state = run_pipeline(
         csv_file_path=args.csv_file_path,
         preview_rows=args.preview_rows,
+        stream_pipeline_output=args.stream_pipeline_output,
     )
     print(final_state.model_dump_json(indent=2))

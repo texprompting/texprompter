@@ -36,6 +36,7 @@ load_dotenv()
 
 ollama_base_url = os.getenv("OLLAMA_BASE_URL")
 ollama_api_key = os.getenv("OLLAMA_API_KEY")
+ollama_model = os.getenv("OLLAMA_MODEL", "llama3.3:70b-instruct-q3_K_M")
 
 headers = {}
 if ollama_api_key and ollama_api_key != "your_api_key_here":
@@ -67,11 +68,15 @@ def _load_text_file(path: Path) -> str:
 
 @tool
 def get_input_schema_payload(
-    csv_file_name: str = "optimization_pipeline_test_easy.csv",
+    csv_file_name: str | None = None,
     preview_rows: int = 5,
 ) -> dict[str, Any]:
     """Return the input schema payload produced by the shared CSV schema utility."""
     import importlib.util
+
+    # Pull CSV path from env when called from pipeline subprocess so schema generation matches the requested dataset.
+    if not csv_file_name:
+        csv_file_name = os.getenv("PIPELINE_CSV_PATH", "optimization_pipeline_test_easy.csv")
 
     data_dir, _ = _resolve_project_paths()
     module_path = data_dir / "csv_to_input_scheme.py"
@@ -133,8 +138,8 @@ class CodeModel(BaseModel):
 try:
     llm = ChatOllama(
         base_url=ollama_base_url,
-        model="llama3.3:70b-instruct-q3_K_M",
-        client_kwargs={"headers": headers} if headers else {},
+        model=ollama_model,
+        client_kwargs={"headers": headers, "verify": False} if headers else {"verify": False},
         reasoning=True,
     )
 
@@ -153,7 +158,8 @@ try:
         "- Do not omit constraints from the mathematical model.\n\n"
         "ABSOLUTE OUTPUT REQUIREMENT:\n"
         "Your final response MUST be a CodeModel tool call and nothing else. "
-        "You MUST provide all fields exactly: code (str), missing_info (str), successful_implementation (bool). "
+        # Kept this aligned with CodeModel fields to avoid contradictory instructions.
+        "You MUST provide all fields exactly: code (str), successful_implementation (bool). "
         "If you do not use the CodeModel tool call, the response is invalid."
     )
 

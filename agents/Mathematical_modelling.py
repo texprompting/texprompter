@@ -21,12 +21,15 @@ load_dotenv()
 
 ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 ollama_api_key = os.getenv("OLLAMA_API_KEY")
+ollama_model = os.getenv("OLLAMA_MODEL", "llama3.3:70b-instruct-q3_K_M")
 
 headers = {}
 if ollama_api_key and ollama_api_key != "your_api_key_here":
     headers["Authorization"] = f"Bearer {ollama_api_key}"
 
 print(f"Connecting to Ollama at {ollama_base_url}...")
+
+csv_path = os.getenv("PIPELINE_CSV_PATH", r"../data/optimization_pipeline_test_easy.csv")
 
 # @tool
 # def get_temperature(city: str) -> float:
@@ -36,8 +39,7 @@ print(f"Connecting to Ollama at {ollama_base_url}...")
 @tool
 def get_column_names() -> list[:str]:
     """Returns the column names of the available csv"""
-    path = r"../data/optimization_pipeline_test_easy.csv"
-    cols = pd.read_csv(path, sep=",",nrows=0).columns.tolist()
+    cols = pd.read_csv(csv_path, sep=",",nrows=0).columns.tolist()
     print("cols: " + str(cols))
     return "The available variables to find reasonable constraints for the LP are: \n" + str(cols)
 
@@ -106,8 +108,8 @@ class ModellingRecommendation(BaseModel):
 try:
     llm = ChatOllama(
         base_url=ollama_base_url,
-        model="llama3.3:70b-instruct-q3_K_M",
-        client_kwargs={"headers": headers} if headers else {},
+        model=ollama_model,
+        client_kwargs={"headers": headers, "verify": False} if headers else {"verify": False},
         reasoning=True,
     )
 
