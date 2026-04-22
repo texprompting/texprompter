@@ -28,9 +28,10 @@ python -m orchestrator.pipeline data/optimization_pipeline_test_easy.csv --strea
 - Use the orchestrator helper to run one node in-process (recommended for testing/fine-tuning):
 
 ```py
-from orchestrator.pipeline import run_agent_node, PipelineState
+from orchestrator.pipeline import run_agent_node
+from schemas.basemodels import PipelineState
 
-state = PipelineState(input_csv_path='data/optimization_pipeline_test_easy.csv')
+state = PipelineState(csv_file_path='data/optimization_pipeline_test_easy.csv')
 result_state = run_agent_node('use_case', state)
 # result_state contains updated state and execution metadata
 ```
