@@ -1,1 +1,1 @@
-\max \sum_{i \in I} p_i x_i
+max \sum_{i \in P} c_i x_i

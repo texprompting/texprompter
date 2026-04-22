@@ -208,3 +208,6 @@ __marimo__/
 
 #Remove Vscode specific settings
 .vscode/
+
+# MLFlow
+mlruns/
