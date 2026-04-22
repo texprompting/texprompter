@@ -26,12 +26,16 @@ load_dotenv()
 
 ollama_base_url = os.getenv("OLLAMA_BASE_URL")
 ollama_api_key = os.getenv("OLLAMA_API_KEY")
+ollama_model = os.getenv("OLLAMA_MODEL", "llama3.3:70b-instruct-q3_K_M")
 
 headers = {}
 if ollama_api_key and ollama_api_key != "your_api_key_here":
     headers["Authorization"] = f"Bearer {ollama_api_key}"
 
 print(f"Connecting to Ollama at {ollama_base_url}...")
+
+# Read the CSV path from pipeline-provided env so this subprocess uses the same dataset as pipeline state.
+csv_path = os.getenv("PIPELINE_CSV_PATH", r"../data/optimization_pipeline_easy.csv")
 
 # -----------------------------
 # TOOLS
@@ -83,8 +87,7 @@ def get_column_names() -> str:
         in the dataset and decide which columns can be used to construct
         sets and parameters for the optimization model.
     """
-    path = r"../data/optimization_pipeline_easy.csv"
-    return str(pd.read_csv(path, nrows=0).columns.tolist())
+    return str(pd.read_csv(csv_path, nrows=0).columns.tolist())
 
 # @tool
 # def preview_csv(path: str) -> str:
@@ -124,8 +127,7 @@ def preview_csv() -> str:
         - When you need to understand relationships between columns
         - When column names alone are not sufficient to infer data meaning
     """
-    path = r"../data/optimization_pipeline_easy.csv"
-    return pd.read_csv(path).head().to_string()
+    return pd.read_csv(csv_path).head().to_string()
 
 @tool
 def get_mathematical_model() -> dict[str, Any]:
@@ -212,8 +214,8 @@ class DataPreparation(BaseModel):
 try:
     llm = ChatOllama(
         base_url=ollama_base_url,
-        model="llama3.3:70b-instruct-q3_K_M",
-        client_kwargs={"headers": headers} if headers else {},
+        model=ollama_model,
+        client_kwargs={"headers": headers, "verify": False} if headers else {"verify": False},
         reasoning=True,
     )
 
@@ -328,9 +330,9 @@ try:
             break
         else:
             print(f"\nAttempt {attempt + 1} did not return the correct tool call. Retrying...")
-            # Let's feed the conversation history back in, appending a strict instruction
+            # Fixed retry contract text to match DataPreparation so the model gets a consistent schema signal.
             messages = response['messages'] + [
-                {"role": "user", "content": "You failed to output using the required CodeModel format. Please output ONLY by calling the 'CodeModel' tool with all required fields: code, successful_implementation."}
+                {"role": "user", "content": "You failed to output using the required DataPreparation format. Please output ONLY by calling the 'DataPreparation' tool with all required fields: imports, data_loading, preprocessing_steps, sets, parameters, data_structures_ready, mapping_explanation, assumptions, full_script."}
             ]
     else:
         print("\nFailed to get a valid structured response after maximum retries.")

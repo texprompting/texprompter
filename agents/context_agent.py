@@ -18,6 +18,7 @@ load_dotenv()
 
 ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 ollama_api_key = os.getenv("OLLAMA_API_KEY")
+ollama_model = os.getenv("OLLAMA_MODEL", "llama3.3:70b-instruct-q3_K_M")
 
 headers = {}
 if ollama_api_key and ollama_api_key != "your_api_key_here":
@@ -25,7 +26,8 @@ if ollama_api_key and ollama_api_key != "your_api_key_here":
 
 print(f"Connecting to Ollama at {ollama_base_url}...")
 
-CSV_PATH = "./Deliverymodule.csv"
+# Allow pipeline runs to inject the selected dataset while preserving the old local default for standalone runs.
+CSV_PATH = os.getenv("PIPELINE_CSV_PATH", "./Deliverymodule.csv")
 
 # TOOLS
 @tool
@@ -68,11 +70,12 @@ class ContextRecommendation(BaseModel):
 # LLM SETUP
 llm = ChatOllama(
     base_url=ollama_base_url,
-    model="llama3.3:70b-instruct-q3_K_M",
+    model=ollama_model,
     client_kwargs={
         "headers": headers,
         "timeout": 120.0,   # optional but helps with slow servers
-    } if headers else {"timeout": 120.0},
+        "verify": False,
+    } if headers else {"timeout": 120.0, "verify": False},
     reasoning=True,
 )
 
