@@ -1113,7 +1113,7 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
                         status="ok",
                         artifact=stage_artifact,
                     )
-                    _mlflow_log_metrics({"duration_seconds": float(time.time() - started_at)})
+                    _mlflow_log_metrics({"scripting_duration_seconds": float(time.time() - started_at)})
                     _finalize_span(
                         span,
                         status="OK",
