@@ -867,7 +867,7 @@ def modeling_node(state: PipelineStateDict) -> PipelineStateDict:
                 )
                 _mlflow_log_metrics(
                     {
-                        "duration_seconds": float(time.time() - started_at),
+                        "modeling_duration_seconds": float(time.time() - started_at),
                         "constraint_count": float(len(current_state.modelling.constraint_functions)),
                     }
                 )
