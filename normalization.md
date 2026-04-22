@@ -39,7 +39,7 @@ result_state = run_agent_node('use_case', state)
 - Or call an agent directly:
 
 ```py
-from agents.legacy_agents.context_agent import run_context_agent
+from agents.context_agent import run_context_agent
 out = run_context_agent('data/optimization_pipeline_test_easy.csv', preview_rows=5)
 ```
 
