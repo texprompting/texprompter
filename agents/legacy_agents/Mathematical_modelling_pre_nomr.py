@@ -37,14 +37,14 @@ csv_path = os.getenv("PIPELINE_CSV_PATH", r"../data/optimization_pipeline_test_e
 #     print("AGENT USED TEMP TOOL CALL!!!!!!!")
 #     return float(np.random.random() * 40 - 10)
 @tool
-def get_column_names() -> list[:str]:
+def get_column_names() -> list[str]:
     """Returns the column names of the available csv"""
     cols = pd.read_csv(csv_path, sep=",",nrows=0).columns.tolist()
     print("cols: " + str(cols))
     return "The available variables to find reasonable constraints for the LP are: \n" + str(cols)
 
 @tool
-def get_reference_model() -> list[:str]:
+def get_reference_model() -> list[str]:
     """"Returns the reference model the Agent should orientate to build the output"""
     path = r"../data/ReferenceMathematicalModel.json"
     data = ""
