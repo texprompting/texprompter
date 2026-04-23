@@ -1,91 +1,94 @@
 {
-    "assumptions": [
-        "Total molding time (T_molding) and total assembly time (T_assembly) were not provided in the CSV data; these are assumed as constants in the script and should be updated with actual business values."
-    ],
-    "data_loading": "df = pd.read_csv('production_data.csv')",
-    "data_structures_ready": true,
-    "full_script": "import pandas as pd\n\n# Load data\ndf = pd.read_csv('production_data.csv')\n\n# 1. Define Sets\n# I: Set of all products\nI = df['Product_SKU'].unique().tolist()\n\n# 2. Define Parameters\n# p_i: Sale price per unit of product i\np = dict(zip(df['Product_SKU'], df['Sale_Price_Per_Unit']))\n\n# c_i: Material cost per unit of product i\nc = dict(zip(df['Product_SKU'], df['Material_Cost_Per_Unit']))\n\n# m_i: Molding time required per unit of product i\nm = dict(zip(df['Product_SKU'], df['Molding_Mins_Req']))\n\n# a_i: Assembly time required per unit of product i\na = dict(zip(df['Product_SKU'], df['Assembly_Mins_Req']))\n\n# Cap_max,i: Maximum market capacity for product i\ncap_max = dict(zip(df['Product_SKU'], df['Max_Market_Capacity']))\n\n# Global capacities (Constants not found in CSV, defined as assumptions)\nT_molding = 10000  # Total available molding time\nT_assembly = 10000 # Total available assembly time\n\n# Verify data structures\nprint(f\"Set I: {I}\")\nprint(f\"Parameter p (first 5): {list(p.items())[:5]}\")\nprint(f\"T_molding: {T_molding}\")\nprint(f\"T_assembly: {T_assembly}\")\n",
-    "imports": "import pandas as pd",
-    "mapping_explanation": [
-        "The set I (products) is derived from the 'Product_SKU' column.",
-        "The sale price p_i is mapped from the 'Sale_Price_Per_Unit' column.",
-        "The material cost c_i is mapped from the 'Material_Cost_Per_Unit' column.",
-        "The molding time m_i is mapped from the 'Molding_Mins_Req' column.",
-        "The assembly time a_i is mapped from the 'Assembly_Mins_Req' column.",
-        "The market capacity Cap_max,i is mapped from the 'Max_Market_Capacity' column.",
-        "T_molding and T_assembly are scalar constants reflecting total resource availability."
-    ],
-    "parameters": [
-        {
-            "description": "Sale price per unit of product i",
-            "python_representation": "p = dict(zip(df['Product_SKU'], df['Sale_Price_Per_Unit']))",
-            "source_columns": [
-                "Product_SKU",
-                "Sale_Price_Per_Unit"
-            ],
-            "symbol": "p_i"
-        },
-        {
-            "description": "Material cost per unit of product i",
-            "python_representation": "c = dict(zip(df['Product_SKU'], df['Material_Cost_Per_Unit']))",
-            "source_columns": [
-                "Product_SKU",
-                "Material_Cost_Per_Unit"
-            ],
-            "symbol": "c_i"
-        },
-        {
-            "description": "Molding time required per unit of product i",
-            "python_representation": "m = dict(zip(df['Product_SKU'], df['Molding_Mins_Req']))",
-            "source_columns": [
-                "Product_SKU",
-                "Molding_Mins_Req"
-            ],
-            "symbol": "m_i"
-        },
-        {
-            "description": "Assembly time required per unit of product i",
-            "python_representation": "a = dict(zip(df['Product_SKU'], df['Assembly_Mins_Req']))",
-            "source_columns": [
-                "Product_SKU",
-                "Assembly_Mins_Req"
-            ],
-            "symbol": "a_i"
-        },
-        {
-            "description": "Maximum market capacity for product i",
-            "python_representation": "cap_max = dict(zip(df['Product_SKU'], df['Max_Market_Capacity']))",
-            "source_columns": [
-                "Product_SKU",
-                "Max_Market_Capacity"
-            ],
-            "symbol": "Cap_{max, i}"
-        },
-        {
-            "description": "Total available molding time",
-            "python_representation": "T_molding = 10000",
-            "source_columns": [],
-            "symbol": "T_{molding}"
-        },
-        {
-            "description": "Total available assembly time",
-            "python_representation": "T_assembly = 10000",
-            "source_columns": [],
-            "symbol": "T_{assembly}"
-        }
-    ],
-    "preprocessing_steps": [
-        "Load the CSV file into a pandas DataFrame.",
-        "Extract unique values from 'Product_SKU' to define the product set I.",
-        "Create dictionaries for product-specific parameters (p_i, c_i, m_i, a_i, Cap_max,i) using 'Product_SKU' as the key.",
-        "Define the global resource constants T_molding and T_assembly as scalars."
-    ],
-    "sets": [
-        {
-            "description": "Set of all products",
-            "name": "I",
-            "python_representation": "I = df['Product_SKU'].unique().tolist()",
-            "source_column": "Product_SKU"
-        }
-    ]
+  "imports": "import pandas as pd",
+  "data_loading": "df = pd.read_csv('optimization_pipeline_test_easy.csv')",
+  "preprocessing_steps": [
+    "Load CSV file into pandas DataFrame",
+    "Extract unique Product_ID values to form the product set P",
+    "Create dictionary mappings for each parameter by grouping DataFrame by Product_ID and extracting the respective column values",
+    "Store parameters as dictionaries keyed by Product_ID for easy access in optimization model"
+  ],
+  "sets": [
+    {
+      "name": "P",
+      "description": "Set of all products to consider for production planning",
+      "source_column": "Product_ID",
+      "python_representation": "P = sorted(df['Product_ID'].unique())"
+    }
+  ],
+  "parameters": [
+    {
+      "symbol": "c_i",
+      "description": "Profit per unit of product i",
+      "source_columns": [
+        "Profit_Per_Unit"
+      ],
+      "python_representation": "c_i = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()"
+    },
+    {
+      "symbol": "m^A_i",
+      "description": "Machine A hours required per unit of product i",
+      "source_columns": [
+        "Machine_A_Hours_Req"
+      ],
+      "python_representation": "m_A_i = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()"
+    },
+    {
+      "symbol": "m^B_i",
+      "description": "Machine B hours required per unit of product i",
+      "source_columns": [
+        "Machine_B_Hours_Req"
+      ],
+      "python_representation": "m_B_i = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()"
+    },
+    {
+      "symbol": "l_i",
+      "description": "Labor hours required per unit of product i",
+      "source_columns": [
+        "Labor_Hours_Req"
+      ],
+      "python_representation": "l_i = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()"
+    },
+    {
+      "symbol": "r_i",
+      "description": "Raw material units required per unit of product i",
+      "source_columns": [
+        "Raw_Material_Units_Req"
+      ],
+      "python_representation": "r_i = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()"
+    },
+    {
+      "symbol": "L_i",
+      "description": "Minimum production requirement for product i",
+      "source_columns": [
+        "Min_Production_Requirement"
+      ],
+      "python_representation": "L_i = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()"
+    },
+    {
+      "symbol": "M_i",
+      "description": "Maximum market demand for product i",
+      "source_columns": [
+        "Max_Market_Demand"
+      ],
+      "python_representation": "M_i = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()"
+    }
+  ],
+  "data_structures_ready": true,
+  "mapping_explanation": [
+    "Product_ID column maps to index i in set P",
+    "Profit_Per_Unit column maps to parameter c_i (objective coefficient)",
+    "Machine_A_Hours_Req column maps to parameter m^A_i (Machine A resource coefficient)",
+    "Machine_B_Hours_Req column maps to parameter m^B_i (Machine B resource coefficient)",
+    "Labor_Hours_Req column maps to parameter l_i (Labor resource coefficient)",
+    "Raw_Material_Units_Req column maps to parameter r_i (Raw material resource coefficient)",
+    "Min_Production_Requirement column maps to parameter L_i (lower bound on production)",
+    "Max_Market_Demand column maps to parameter M_i (upper bound on production)"
+  ],
+  "assumptions": [
+    "Resource capacities C^A, C^B, C^L, C^R are external constraints not provided in the CSV and must be specified separately",
+    "All Product_ID values are unique and valid indices for the optimization model",
+    "All parameter values are non-negative where physically meaningful",
+    "Missing or null values in the CSV are assumed to not exist in the clean dataset"
+  ],
+  "full_script": "import pandas as pd\n\n# Load data\ndf = pd.read_csv('optimization_pipeline_test_easy.csv')\n\n# Define the set of products\nP = sorted(df['Product_ID'].unique())\n\n# Define parameters as dictionaries keyed by product ID\nc_i = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()\nm_A_i = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()\nm_B_i = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()\nl_i = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()\nr_i = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()\nL_i = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()\nM_i = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()\n\n# Note: Resource capacities C^A, C^B, C^L, C^R must be provided externally\n# Example:\n# C_A = 1000  # Machine A hours available\n# C_B = 800   # Machine B hours available\n# C_L = 2000  # Labor hours available\n# C_R = 500   # Raw material units available"
 }

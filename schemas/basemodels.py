@@ -130,15 +130,33 @@ class AgentError(BaseModel):
     detail: str | None = None
 
 
+class AgentExecutionMetadata(BaseModel):
+    """Execution metadata for one agent stage, used for tracing and MLflow logging."""
+
+    agent_name: str
+    started_at: str
+    completed_at: str | None = None
+    duration_seconds: float | None = None
+    status: Literal["ok", "error"]
+    tool_calls: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class PipelineState(BaseModel):
     """Shared LangGraph state passed between all pipeline nodes."""
 
     csv_file_path: str
     preview_rows: int = 5
     status: Literal["ok", "error"] = "ok"
+    input_schema_payload: dict[str, Any] = Field(default_factory=dict)
     use_case: UseCaseRecommendation | None = None
     modelling: ModellingRecommendation | None = None
     preprocessing: PreprocessingRecommendation | None = None
     scripting: ScriptingRecommendation | None = None
     errors: list[AgentError] = Field(default_factory=list)
     traces: list[str] = Field(default_factory=list)
+    llm_artifacts: dict[str, Any] = Field(default_factory=dict)
+    execution_metadata: list[AgentExecutionMetadata] = Field(default_factory=list)
+    skip_stages: list[str] = Field(default_factory=list)
+    retry_config: dict[str, int] = Field(default_factory=dict)
+    llm_config: dict[str, str] = Field(default_factory=dict)
