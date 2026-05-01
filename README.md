@@ -59,10 +59,81 @@ python -m orchestrator.pipeline
 Default input CSV is `data/optimization_pipeline_test_easy.csv`. Generated artifacts are written to `TestOutputs/`.
 
 
+## Dev startup scripts (Unix / Windows)
+
+Interactive launcher at the **`texprompter/`** package root:
+
+- **Unix:** [`start_texprompter.sh`](start_texprompter.sh)
+- **Windows (PowerShell):** [`start_texprompter.ps1`](start_texprompter.ps1)
+
+Both run from `texprompter/` (repo root), prepend `PYTHONPATH`, and invoke [`scripts/texprompter_dev.py`](scripts/texprompter_dev.py).
+
+The driver (**SSH key auth only** — no password variables or `sshpass`):
+
+1. Loads **`texprompter/.env`** via `python-dotenv` (if installed).
+2. Ensures **`RZ_KENNUNG`** is set (prompts once and saves). **`RZ_SSH_HOST`** defaults to `194.95.108.135` and is written to `.env` when missing. Optional: **`RZ_SSH_LOCAL_OLLAMA_PORT`** / **`RZ_SSH_REMOTE_OLLAMA_PORT`** (default `11434`).
+3. Asks whether to run **`ssh-copy-id`** \[y/N\] (default **No**). If **No**, assumes your public key is already authorized on the jump host.
+4. Opens an SSH tunnel **`localhost:<local> → localhost:<remote>` on the server** using `ssh -N` with `BatchMode=yes`.
+5. Starts **MLflow** with `sqlite:///./mlflow.db` at **http://127.0.0.1:5000** (`--workers 1`).
+6. Asks whether to enable **live LLM / pipeline streaming** (`OLLAMA_STREAM_STDOUT=1` and `--stream-pipeline-output` for pipeline runs).
+7. Menu: **(1)** run the pipeline on a CSV chosen from the same list as evaluation seeds (paths under `data/`; industrial CSVs live in `data/versatile_producion_system` — that folder name matches the repo spelling), **(2)** run **`python -m evaluation.run_eval --with-judge`**.
+
+On exit (or Ctrl+C), SSH and MLflow child processes started by the script are terminated.
+
+```bash
+cd texprompter
+./start_texprompter.sh
+```
+
+```powershell
+cd texprompter
+.\start_texprompter.ps1
+```
+
+Direct Python (same cwd):
+
+```bash
+PYTHONPATH=. python scripts/texprompter_dev.py
+```
+
+
+## MLflow, Prompt Registry, Evaluation
+
+This project uses MLflow autologging (no hand-rolled instrumentation). After completing the conda install above, also install the supplemental dependencies:
+
+```bash
+pip install -r requirements-mlflow.txt
+```
+
+The pipeline talks to a local Ollama instance through Ollama's OpenAI-compatible API (`$OLLAMA_BASE_URL/v1`). `mlflow.langchain.autolog(run_tracer_inline=True)` captures every LangGraph node, ChatOpenAI call and tool invocation as a nested span (`<agent> > LangGraph > model > tools > ...`). `run_tracer_inline=True` is **required** so the tracer context propagates back when LangGraph fans out parallel tool calls; otherwise the next model node never starts. We deliberately do **not** stack `mlflow.openai.autolog()` on top — the duplicate `Completions` layer combined with parallel tool fanout could deadlock the agent loop.
+
+MLflow Prompt Registry entries are global, not scoped to an experiment. Runtime pipeline runs load prompts with `prompts:/texprompter.<stage>@latest`, then record the resolved prompt URI, version, and source on both the active run tags (`prompt.<stage>.*`) and the trace metadata. If the registry is unavailable, the loader falls back to `prompts/*.txt` and marks the source as `local_file`; set `MLFLOW_PROMPT_REGISTRY_REQUIRED=true` to fail instead. User messages are not separate registry prompts: they are logged as trace chat messages together with the system prompt so the MLflow trace view shows the actual request sent to each agent.
+
+Resilience knobs (all optional, set in `.env`):
+
+- `OLLAMA_REQUEST_TIMEOUT_S` (default `180`) and `OLLAMA_REQUEST_MAX_RETRIES` (default `1`) bound every Ollama HTTP call so a wedged response surfaces as `APITimeoutError` instead of an indefinite hang.
+- `AGENT_RECURSION_LIMIT` (default `12`) caps the number of LangGraph steps any single `agent.invoke` may take, so a structured-output retry loop fails fast.
+
+Useful commands:
+
+```bash
+mlflow server --backend-store-uri sqlite:///./mlflow.db --host 127.0.0.1 --port 5000 --workers 1   # UI (workers 1 required for sqlite)
+python -m scripts.register_prompts                                                     # sync prompts/*.txt -> Prompt Registry
+python -m evaluation.run_eval                                                          # deterministic scorers
+python -m evaluation.run_eval --with-judge                                             # add LLM-as-judge
+```
+
+See `normalization.md` for full details (env vars, scorer descriptions, prompt-edit workflow).
+
+
 ## Scaffold Outline (apart from `agents/`)
 
 - `orchestrator/pipeline.py`: graph wiring, state transitions, and node error handling.
 - `schemas/basemodels.py`: all inter-agent message contracts.
+- `prompts/`: agent system prompts (source of truth for the MLflow Prompt Registry).
+- `scripts/register_prompts.py`: idempotent registration of `prompts/*.txt` into MLflow.
+- `scripts/texprompter_dev.py`, `start_texprompter.sh`, `start_texprompter.ps1`: dev launcher (SSH tunnel, MLflow, menu).
+- `evaluation/`: `mlflow.genai.evaluate` harness, scorers, and seed dataset.
 
 
 ## Contributing Guide

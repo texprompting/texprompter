@@ -3,17 +3,22 @@
 This project was refactored to a state-first, LangGraph-style pipeline. The goals were:
 - expose each legacy agent as a simple callable `run_*` function
 - pass a central `PipelineState` between nodes instead of relying on environment side-effects
-- add optional MLflow-based observability with a sensible local default
+- use MLflow autologging for observability instead of hand-rolled instrumentation
 - enable isolated per-agent testing and easy local invocation
 
 **Major changes**
 - State-first pipeline: an `initialize` node loads the CSV input schema into `state.input_schema_payload`. Nodes receive and return state.
 - Normalized agents: legacy agents were converted to `run_context_agent`, `run_mathematical_modelling_agent`, `run_data_processor_agent`, `run_pulp_coding_agent` in `agents/`.
-- Orchestrator: `orchestrator.pipeline` now provides `run_agent_node(node_name, state)` and a CLI to run the whole pipeline.
-- MLflow: optional per-run tracking is available; the pipeline wraps runs so failures in tracking won't break tests.
+- Orchestrator: `orchestrator.pipeline` provides `run_agent_node(node_name, state)` and a CLI to run the whole pipeline.
+- LLM client: agents call Ollama through `langchain_openai.ChatOpenAI` pointed at `$OLLAMA_BASE_URL/v1` (Ollama's OpenAI-compatible API). `mlflow.langchain.autolog()` captures every LangGraph node, ChatOpenAI call and tool invocation as a nested span (the trace UI then shows `use_case > LangGraph > model > tools > model` for every agent). We deliberately do **not** stack `mlflow.openai.autolog()` on top: the duplicate `Completions` span layer combined with langgraph's parallel tool fanout could deadlock the agent loop after the parallel tools returned.
+- Resilience knobs:
+  - `OLLAMA_REQUEST_TIMEOUT_S` (default `180`) and `OLLAMA_REQUEST_MAX_RETRIES` (default `1`) bound every Ollama call so a wedged HTTP read surfaces as `APITimeoutError` ("Request timed out.") in the agent's error path instead of an indefinite hang.
+  - `AGENT_RECURSION_LIMIT` (default `12`) caps the number of LangGraph steps any single `agent.invoke` may take.
+  - All output schemas (`UseCaseRecommendation`, `ModellingRecommendation`, `PreprocessingRecommendation`, `ScriptingRecommendation`, `ContextRecommendation`, `DataPreparation`) carry `mode='before'` field validators that auto-decode JSON-string returns into real lists/dicts. This is critical for local LLMs: Qwen via Ollama frequently emits e.g. `constraint_functions` as a stringified JSON array, which would otherwise fail pydantic validation and send `create_agent` into a structured-output retry loop.
+- Prompt registry: agent system prompts live in `texprompter/prompts/*.txt` and are mirrored into the MLflow Prompt Registry by `python -m scripts.register_prompts`.
 
 **Quick: run the whole pipeline (CLI)**
-- Example (PowerShell / cmd):
+- Example:
 
 ```
 python -m orchestrator.pipeline data/optimization_pipeline_test_easy.csv --stream-pipeline-output
@@ -22,7 +27,6 @@ python -m orchestrator.pipeline data/optimization_pipeline_test_easy.csv --strea
 - Notes:
   - The first positional arg is the path to the input CSV.
   - `--stream-pipeline-output` enables live console streaming of node outputs (used during debugging).
-  - Additional CLI flags may exist; you can also call the pipeline from Python for more control.
 
 **Run a single node / agent (Python)**
 - Use the orchestrator helper to run one node in-process (recommended for testing/fine-tuning):
@@ -33,7 +37,6 @@ from schemas.basemodels import PipelineState
 
 state = PipelineState(csv_file_path='data/optimization_pipeline_test_easy.csv')
 result_state = run_agent_node('use_case', state)
-# result_state contains updated state and execution metadata
 ```
 
 - Or call an agent directly:
@@ -43,88 +46,94 @@ from agents.context_agent import run_context_agent
 out = run_context_agent('data/optimization_pipeline_test_easy.csv', preview_rows=5)
 ```
 
-This direct call is useful when preparing datasets or extracting prompts for fine-tuning.
+**Environment**
 
-**MLflow configuration & usage**
-- The pipeline uses MLflow for tracking when configured. Configure via environment variables before running:
-
-- `MLFLOW_TRACKING_URI` — tracking server URI. Example local SQLite file:
+Required `.env` variables (already templated in `texprompter/.env`):
 
 ```
-set MLFLOW_TRACKING_URI=sqlite:///./mlflow.db    # Windows cmd
-$env:MLFLOW_TRACKING_URI = 'sqlite:///./mlflow.db'  # PowerShell
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3.6:latest
+OPENAI_API_KEY=ollama
+MLFLOW_TRACKING_URI=sqlite:///./mlflow.db
+MLFLOW_EXPERIMENT_NAME=texprompter_pipeline
+# Optional: bound every Ollama call so a wedged read errors out cleanly.
+OLLAMA_REQUEST_TIMEOUT_S=180
+OLLAMA_REQUEST_MAX_RETRIES=1
+# Optional: cap LangGraph steps per agent.invoke (default 12).
+AGENT_RECURSION_LIMIT=12
 ```
 
-- `MLFLOW_EXPERIMENT_NAME` — optional experiment name (default used if not set).
-
-- Behavior:
-  - If MLflow is not reachable or not configured, the pipeline will continue and tests will still run; MLflow errors are caught and logged.
-  - For robust cross-platform local tracking prefer a SQLite URI (`sqlite:///./mlflow.db`) over MLflow's file-store.
-
-- Start a local server/UI against the same backend used by the pipeline:
+Install the supplemental MLflow dependencies on top of the conda-lock environment:
 
 ```
-mlflow server --backend-store-uri "sqlite:///C:/Users/simon/6_Semester/kip/KIP_texprompter/texprompter/mlflow.db" --host 127.0.0.1 --port 5000
+pip install -r requirements-mlflow.txt
 ```
 
-Then set:
+**MLflow tracking**
+
+`run_pipeline()` calls `_setup_mlflow()` once per process which:
+- sets `MLFLOW_TRACKING_URI` (defaults to `sqlite:///./mlflow.db`)
+- sets the experiment to `MLFLOW_EXPERIMENT_NAME` (default `texprompter_pipeline`)
+- enables `mlflow.langchain.autolog(run_tracer_inline=True)`
+
+Every pipeline invocation runs inside a single `mlflow.start_run`. With autolog enabled, each LLM call, tool call, and LangGraph step is captured as a nested span — visible under the **Traces** tab in the MLflow UI without any per-node boilerplate.
+
+Start the local MLflow UI against the same backend:
+
+```
+mlflow server --backend-store-uri "sqlite:///./mlflow.db" --host 127.0.0.1 --port 5000 --workers 1
+```
+
+`--workers 1` is important when the backend store is sqlite. MLflow 3.x defaults to 4 uvicorn workers, and 4 concurrent writers on the same sqlite file deadlock and return 503 on every write endpoint (`experiments/create`, `runs/create`, `runs/log-metric`, etc.). For Postgres/MySQL backends the default is fine.
+
+Then point the pipeline at it:
 
 ```
 MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 ```
 
-**What is now logged (thorough setup)**
-- Per stage (`initialize`, `use_case`, `modeling`, `preprocessing`, `scripting`):
-  - structured recommendation payloads
-  - tool trace (`*_agent` tool calls in order)
-  - `llm_diagnostics.json` with attempt-level details:
-    - attempt count
-    - seen tool names per attempt
-    - preview of last model message per attempt
-    - validation error (if schema validation failed)
-  - stage metrics (`duration_seconds`, tool call count, llm attempt count)
-- Pipeline-level artifacts:
-  - `pipeline/final_state.json`
-  - `pipeline/execution_metadata.json`
-  - `pipeline/llm_artifacts.json`
-  - `pipeline/errors.json`
-- MLflow tracing:
-  - spans are emitted via `mlflow.start_span(...)`
-  - traces can appear in the **Traces** tab (not only Experiments/Runs)
+**What gets logged automatically**
+- Per LLM call: prompt, response, model, latency, token usage (via `mlflow.langchain.autolog`)
+- Per agent run: tool calls, tool inputs/outputs, intermediate messages (via `mlflow.langchain.autolog`)
+- Per pipeline run: parameters (`csv_file_path`, `preview_rows`), tags (`pipeline.status`), metrics (`errors_count`, `trace_count`)
 
-**Where to inspect in UI**
-- **Experiments** tab:
-  - open a pipeline run and inspect the `Artifacts` panel for `*/llm_diagnostics.json`
-  - inspect `Metrics` and `Tags` for stage-level counters and statuses
-- **Traces** tab:
-  - inspect pipeline/stage spans and error states
-  - useful for timeline-style debugging when a stage fails to return structured output
-- **Evaluation Runs** tab:
-  - here you can see all the invoked agents
-  - click on "go to run" (small rectangle with arrow that appears when hovering over agent name) you can information that may be interesting to you in Artifacts
+The `PipelineState` itself still tracks `errors`, `traces`, and `execution_metadata` for downstream consumers (tests, eval scorers); the orchestrator no longer mirrors those into MLflow as artifacts because the auto-traces already cover them.
 
-**Troubleshooting MLflow visibility**
-- If runs appear but traces are missing:
-  - ensure pipeline and UI/server point to the same backend URI
-  - verify trace tables in sqlite are non-zero (`trace_info`, `spans`)
-- Avoid using legacy `mlruns` file store in this project; use sqlite backend instead.
+**Prompt Registry**
 
-**Best practices for MLflow**
-- For CI or team runs, use a centralized MLflow server (HTTP URI) and set `MLFLOW_TRACKING_URI` accordingly.
-- Use `MLFLOW_EXPERIMENT_NAME` to group runs from this pipeline.
+Edit a prompt:
 
-**Finetuning / extracting training data from an agent**
-- Call the agent directly to get the structured output which contains prompts, LLM traces, or generated code:
+1. Edit the relevant file in `texprompter/prompts/` (`use_case.txt`, `modeling.txt`, `preprocessing.txt`, or `scripting.txt`).
+2. Run `python -m scripts.register_prompts` to push a new version into the registry. The script is idempotent — it only creates a new version when the local content differs from the registered one.
+3. The next pipeline run picks up the new `latest` version automatically (`agents/prompts.py::load_system_prompt_result` calls `mlflow.genai.load_prompt(prompts:/texprompter.<name>@latest)`).
 
-```py
-from agents.mathematical_modelling import run_mathematical_modelling_agent
-payload = run_mathematical_modelling_agent(csv_file_path='data/my.csv')
-# Inspect payload for prompt examples or generated JSON to construct finetuning datasets
+If the registry is unreachable, the loader falls back to the local `prompts/*.txt` file and records `source=local_file` in the run/trace metadata, so tests and offline runs still work. Set `MLFLOW_PROMPT_REGISTRY_REQUIRED=true` to fail instead.
+
+**Evaluation**
+
+Run the deterministic structural scorers over the seed dataset built from `data/*.csv`:
+
+```
+python -m evaluation.run_eval
 ```
 
-- The agent outputs are plain Python structures and often write compatibility artifacts to `TestOutputs/` for convenience.
-state = PipelineState(csv_file_path='data/optimization_pipeline_test_easy.csv')
+Add the LLM-as-judge scorer (requires an OpenAI-compatible endpoint configured for the judge — Ollama via `OPENAI_BASE_URL=http://localhost:11434/v1` works):
+
+```
+python -m evaluation.run_eval --with-judge
+```
+
+Scorers live in `evaluation/scorers.py`:
+- `pipeline_ok` — final state is not `error`
+- `all_schemas_valid` — every per-stage payload re-validates against its Pydantic schema
+- `scripting_code_compiles` — generated PuLP code passes `compile()`
+- `objective_aligned` — `Guidelines` LLM-as-judge for `use_case.objective_variable` ↔ `modelling.objective_function` alignment
+
+The dataset (`evaluation/datasets.py`) just supplies CSV paths; this is a regression / smoke harness, not a labelled benchmark. Results are visible in the MLflow UI under the **Runs → Evaluation** tab.
+
 **Where to look next**
-- Orchestrator entry: `orchestrator/pipeline.py` — pipeline CLI and helpers.
-- Agent entrypoints: `agents/*` — normalized `run_*` functions.
-- Shared helpers: `agents/shared.py` — CSV schema loader and invoke helpers.
+- Orchestrator entry: `orchestrator/pipeline.py`
+- Agent entrypoints: `agents/*.py`
+- Shared helpers: `agents/shared.py` (LLM client + tool-trace extraction)
+- Prompt loader: `agents/prompts.py`
+- Eval harness: `evaluation/`

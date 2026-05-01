@@ -1,101 +1,80 @@
 import pandas as pd
-from pulp import (
-    LpProblem,
-    LpVariable,
-    lpSum,
-    LpMaximize,
-    PULP_CBC_CMD,
-    LpStatus,
-)
+import pulp
 
+# Load data
+csv_file_path = "/home/bene/Documents/Coding/Uni/KI-Projekt/texprompter/data/optimization_pipeline_test_easy.csv"
+df = pd.read_csv(csv_file_path)
 
-def solve_product_mix(
-    csv_path: str = "optimization_pipeline_test_easy.csv",
-    capacity_machine_a: float = 100.0,
-    capacity_machine_b: float = 100.0,
-    capacity_labor: float = 500.0,
-    capacity_raw_material: float = 500.0,
-) -> dict:
-    """
-    Solve the product mix optimization MILP.
+# Define index set P
+P = df['Product_ID'].tolist()
 
-    Parameters
-    ----------
-    csv_path : str
-        Path to the input CSV file with product data.
-    capacity_machine_a : float
-        Total available Machine A hours (C^A).
-    capacity_machine_b : float
-        Total available Machine B hours (C^B).
-    capacity_labor : float
-        Total available Labor hours (C^L).
-    capacity_raw_material : float
-        Total available Raw Material units (C^R).
+# Define parameters as dictionaries keyed by product ID
+c = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))
+M_A = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))
+M_B = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))
+L = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))
+R = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))
+D = dict(zip(df['Product_ID'], df['Max_Market_Demand']))
+m = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))
 
-    Returns
-    -------
-    dict
-        Dictionary containing solution_status, objective_value,
-        decision_variables, and solver_message.
-    """
-    # ── 1. Load input data ──────────────────────────────────────────
-    df = pd.read_csv(csv_path)
+# Global resource capacities (external constants not in CSV)
+C_A = 1000  # Total available Machine A hours
+C_B = 800   # Total available Machine B hours
+C_L = 500   # Total available Labor hours
+C_R = 2000  # Total available Raw material units
 
-    products = df["Product_ID"].tolist()
+# Create the problem (maximization)
+prob = pulp.LpProblem("Production_Planning", pulp.LpMaximize)
 
-    profit = df["Profit_Per_Unit"].to_dict()
-    machine_a_req = df["Machine_A_Hours_Req"].to_dict()
-    machine_b_req = df["Machine_B_Hours_Req"].to_dict()
-    labor_req = df["Labor_Hours_Req"].to_dict()
-    raw_mat_req = df["Raw_Material_Units_Req"].to_dict()
-    min_prod = df["Min_Production_Requirement"].to_dict()
-    max_demand = df["Max_Market_Demand"].to_dict()
+# Create decision variables (non-negative integers)
+x = pulp.LpVariable.dicts("Production", P, lowBound=0, cat='Integer')
 
-    # ── 2. Build the LP problem ─────────────────────────────────────
-    prob = LpProblem("ProductMix", LpMaximize)
+# Objective function: Maximize total profit
+prob += pulp.lpSum([c[p] * x[p] for p in P]), "Total_Profit"
 
-    # Decision variables: L_i ≤ x_i ≤ D_i
-    x = {
-        i: LpVariable(
-            f"x_{i}",
-            lowBound=min_prod.get(i, 0),
-            upBound=max_demand.get(i, 0),
-            cat="Continuous",
-        )
-        for i in products
-    }
+# Constraints
+# Machine A capacity
+prob += pulp.lpSum([M_A[p] * x[p] for p in P]) <= C_A, "Machine_A_Capacity"
 
-    # Objective: max Σ c_i * x_i
-    prob += lpSum([profit[i] * x[i] for i in products])
+# Machine B capacity
+prob += pulp.lpSum([M_B[p] * x[p] for p in P]) <= C_B, "Machine_B_Capacity"
 
-    # Resource capacity constraints
-    prob += lpSum([machine_a_req[i] * x[i] for i in products]) <= capacity_machine_a, "MachineA"
-    prob += lpSum([machine_b_req[i] * x[i] for i in products]) <= capacity_machine_b, "MachineB"
-    prob += lpSum([labor_req[i] * x[i] for i in products]) <= capacity_labor, "Labor"
-    prob += lpSum([raw_mat_req[i] * x[i] for i in products]) <= capacity_raw_material, "RawMaterial"
+# Labor capacity
+prob += pulp.lpSum([L[p] * x[p] for p in P]) <= C_L, "Labor_Capacity"
 
-    # ── 3. Solve ────────────────────────────────────────────────────
-    solver = PULP_CBC_CMD(msg=False)
-    prob.solve(solver)
+# Raw material capacity
+prob += pulp.lpSum([R[p] * x[p] for p in P]) <= C_R, "Raw_Material_Capacity"
 
-    # ── 4. Extract results ──────────────────────────────────────────
-    status = LpStatus[prob.status]
-    obj_value = prob.objective.value() if prob.objective else 0.0
-    dec_vars = {i: x[i].varValue if x[i].varValue is not None else 0.0 for i in products}
-    solver_msg = str(prob.message)
+# Demand limits (upper bound)
+for p in P:
+    prob += x[p] <= D[p], f"Demand_Limit_{p}"
 
-    return {
-        "solution_status": status,
-        "objective_value": float(obj_value),
-        "decision_variables": dec_vars,
-        "solver_message": solver_msg,
-    }
+# Minimum production requirements (lower bound)
+for p in P:
+    prob += x[p] >= m[p], f"Min_Production_{p}"
 
+# Solve the problem
+prob.solve()
 
-# ── Quick CLI wrapper (optional) ────────────────────────────────────
-if __name__ == "__main__":
-    result = solve_product_mix()
-    print("Status :", result["solution_status"])
-    print("Obj.   :", result["objective_value"])
-    print("Vars.  :", result["decision_variables"])
-    print("Message:", result["solver_message"])
+# Extract results
+decision_variables = {p: pulp.value(x[p]) for p in P}
+objective_value = pulp.value(prob.objective)
+solution_status = pulp.LpStatus[prob.status]
+
+# Generate solver message based on status
+if solution_status == 'Optimal':
+    solver_message = "Optimal solution found."
+elif solution_status == 'Infeasible':
+    solver_message = "No feasible solution exists."
+elif solution_status == 'Unbounded':
+    solver_message = "The problem is unbounded."
+else:
+    solver_message = f"Solver status: {solution_status}"
+
+# Return the results in the requested schema
+results = {
+    "decision_variables": decision_variables,
+    "objective_value": objective_value,
+    "solution_status": solution_status,
+    "solver_message": solver_message
+}

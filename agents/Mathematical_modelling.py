@@ -9,12 +9,17 @@ from typing import Any
 import pandas as pd
 from langchain.agents import create_agent
 from langchain_core.tools import tool
+from pydantic import BaseModel
 
+from agents.prompts import load_system_prompt_result
 from agents.shared import (
-    build_ollama_model,
+    _last_ai_content,
+    build_chat_model,
+    extract_tool_trace,
     get_data_dir,
     get_test_outputs_dir,
-    invoke_structured_agent,
+    invoke_agent_with_prompt_trace,
+    prompt_debug_payload,
 )
 from schemas.basemodels import ModellingRecommendation, UseCaseRecommendation
 
@@ -42,20 +47,37 @@ def _load_reference_model() -> dict[str, Any]:
 
 
 def _persist_outputs(recommendation: ModellingRecommendation) -> None:
-    outputs_dir = get_test_outputs_dir()
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    (outputs_dir / "llm_objective_function.md").write_text(
-        recommendation.objective_function.strip(),
-        encoding="utf-8",
-    )
-    (outputs_dir / "llm_constraints.md").write_text(
-        "\n".join(item.strip() for item in recommendation.constraint_functions),
-        encoding="utf-8",
-    )
-    (outputs_dir / "llm_output.md").write_text(
-        recommendation.readable_documentation.strip(),
-        encoding="utf-8",
-    )
+    """Write modelling artifacts to TestOutputs/; non-fatal if the directory is missing."""
+    try:
+        outputs_dir = get_test_outputs_dir()
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        (outputs_dir / "llm_objective_function.md").write_text(
+            recommendation.objective_function.strip(),
+            encoding="utf-8",
+        )
+        (outputs_dir / "llm_constraints.md").write_text(
+            "\n".join(item.strip() for item in recommendation.constraint_functions),
+            encoding="utf-8",
+        )
+        (outputs_dir / "llm_output.md").write_text(
+            recommendation.readable_documentation.strip(),
+            encoding="utf-8",
+        )
+    except OSError as io_err:
+        # Non-fatal: the agent result is still valid; we just could not persist
+        # the side-output files (e.g. in CI or a read-only environment).
+        import warnings
+        warnings.warn(f"_persist_outputs failed (non-fatal): {io_err}", RuntimeWarning, stacklevel=2)
+
+
+def _coerce_recommendation(value: Any) -> ModellingRecommendation:
+    if isinstance(value, ModellingRecommendation):
+        return value
+    if isinstance(value, BaseModel):
+        return ModellingRecommendation.model_validate(value.model_dump())
+    if isinstance(value, dict):
+        return ModellingRecommendation.model_validate(value)
+    raise TypeError(f"Unexpected structured_response type: {type(value)!r}")
 
 
 def run_mathematical_modelling_agent(
@@ -106,50 +128,47 @@ def run_mathematical_modelling_agent(
             return use_case.model_dump()
         return dict(use_case)
 
-    llm = build_ollama_model()
+    prompt = load_system_prompt_result("modeling")
     agent = create_agent(
-        model=llm,
+        model=build_chat_model(),
         tools=[get_use_case_recommendation, get_column_names, get_reference_model],
-        system_prompt=(
-            "You are a mathematical expert in MILP optimization. "
-            "Use tool calls to inspect use-case, CSV columns, and reference style before drafting the model.\n\n"
-            "Required workflow:\n"
-            "1. Call get_use_case_recommendation\n"
-            "2. Call get_column_names\n"
-            "3. Call get_reference_model\n"
-            "4. Return ModellingRecommendation only via tool call\n\n"
-            "Rules:\n"
-            "- Provide pseudo-LaTeX style objective and constraints\n"
-            "- Include all required fields exactly\n"
-            "- Do not emit plain text-only final answers\n"
-        ),
+        system_prompt=prompt.template,
         response_format=ModellingRecommendation,
     )
-
-    tool_trace: list[str] = []
-    debug_trace: dict[str, Any] = {}
-    args = invoke_structured_agent(
-        agent=agent,
-        user_input=(
-            "Create a MILP formulation for optimizing production quantity per product using only tool outputs."
-        ),
-        response_tool_name="ModellingRecommendation",
-        retry_message=(
-            "You failed to output ModellingRecommendation correctly. Return only a valid "
-            "ModellingRecommendation tool call with all required fields."
-        ),
-        response_model=ModellingRecommendation,
-        tool_trace=tool_trace,
-        debug_trace=debug_trace,
+    user_message = (
+        "Create a MILP formulation for optimizing production quantity per product "
+        "using only tool outputs."
     )
 
-    recommendation = ModellingRecommendation.model_validate(args)
+    response = invoke_agent_with_prompt_trace(
+        agent,
+        stage="modeling",
+        prompt=prompt,
+        user_message=user_message,
+    )
+
+    structured = response.get("structured_response")
+    if structured is None:
+        # Fallback: attempt to parse the last AI message text as JSON.
+        last_content = _last_ai_content(response.get("messages", []))
+        if last_content:
+            try:
+                structured = ModellingRecommendation.model_validate_json(last_content)
+            except Exception:
+                pass
+    if structured is None:
+        raise ValueError("modeling agent did not produce a structured_response.")
+
+
+    recommendation = _coerce_recommendation(structured)
     _persist_outputs(recommendation)
+
     if return_debug:
+        tool_trace = extract_tool_trace(response.get("messages", []))
         return {
             "result": recommendation.model_dump(),
             "tool_trace": tool_trace,
-            "debug": debug_trace,
+            "debug": {"prompt": prompt_debug_payload(prompt)},
         }
     return recommendation.model_dump()
 
