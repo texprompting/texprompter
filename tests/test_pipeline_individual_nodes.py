@@ -22,9 +22,9 @@ def test_initialize_node_populates_input_schema_payload() -> None:
         }
     )
 
-    assert result["status"] == "ok"
-    assert result["input_schema_payload"]
-    assert "initialize:ok" in result["traces"]
+    assert result.get("status") == "ok"
+    assert result.get("input_schema_payload")
+    assert "initialize:ok" in result.get("traces", [])
 
 
 def test_run_agent_node_use_case_contract(monkeypatch: Any) -> None:
@@ -57,6 +57,50 @@ def test_run_agent_node_use_case_contract(monkeypatch: Any) -> None:
     assert result_state.use_case is not None
     assert result_state.use_case.use_case_name == "Production Planning"
     assert result_state.traces[-1] == "use_case:ok"
+
+
+def test_run_agent_node_records_prompt_lineage(monkeypatch: Any) -> None:
+    def fake_run_use_case_agent(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "result": UseCaseRecommendation(
+                use_case_name="Production Planning",
+                business_goal="Maximize profit",
+                objective_direction="max",
+                objective_variable="profit",
+                decision_variables=["x_i"],
+                required_columns=["Product_ID"],
+                constraints_to_consider=[],
+                assumptions=[],
+                rationale="Synthetic test response",
+            ).model_dump(),
+            "tool_trace": [],
+            "debug": {
+                "prompt": {
+                    "registry_name": "texprompter.use_case",
+                    "requested_uri": "prompts:/texprompter.use_case@latest",
+                    "resolved_uri": "prompts:/texprompter.use_case/2",
+                    "version": "2",
+                    "source": "registry",
+                }
+            },
+        }
+
+    monkeypatch.setattr("orchestrator.pipeline.run_use_case_agent", fake_run_use_case_agent)
+
+    result_state = run_agent_node(
+        "use_case",
+        {
+            "csv_file_path": "data/optimization_pipeline_test_easy.csv",
+            "preview_rows": 5,
+            "status": "ok",
+            "errors": [],
+            "traces": [],
+        },
+    )
+
+    prompt_artifacts = result_state.llm_artifacts["prompts"]["use_case"]
+    assert prompt_artifacts["resolved_uri"] == "prompts:/texprompter.use_case/2"
+    assert "prompt_uri=prompts:/texprompter.use_case/2" in result_state.execution_metadata[-1].notes
 
 
 def test_run_agent_node_modeling_receives_upstream_use_case(monkeypatch: Any) -> None:
@@ -205,3 +249,62 @@ def test_run_agent_node_scripting_consumes_state(monkeypatch: Any) -> None:
     assert result_state.scripting.successful_implementation is True
     assert captured.get("input_schema_payload") == {"records": []}
     assert result_state.traces[-1] == "scripting:ok"
+
+
+def test_run_agent_node_scripting_preserves_exception_debug(monkeypatch: Any) -> None:
+    class DebugError(RuntimeError):
+        def __init__(self) -> None:
+            super().__init__("Request timed out.")
+            self.tool_trace = ["ScriptingRecommendation"]
+            self.debug = {
+                "milestones": [
+                    {"event": "csv_resolved"},
+                    {"event": "model_request_start"},
+                    {"event": "error"},
+                ],
+                "model": {
+                    "model": "qwen3.6:latest",
+                    "timeout": 30,
+                    "max_retries": 0,
+                },
+            }
+
+    def fake_run_scripting_agent(**_kwargs: Any) -> ScriptingRecommendation:
+        raise DebugError()
+
+    monkeypatch.setattr("orchestrator.pipeline.run_scripting_agent", fake_run_scripting_agent)
+
+    result_state = run_agent_node(
+        "scripting",
+        {
+            "csv_file_path": "data/optimization_pipeline_test_easy.csv",
+            "preview_rows": 5,
+            "status": "ok",
+            "errors": [],
+            "traces": [],
+            "input_schema_payload": {"records": []},
+            "preprocessing": {
+                "input_schema_payload": {"records": []},
+                "mapper_script": "def map_data(df):\n    return {}",
+                "mapping_notes": [],
+                "assumptions": [],
+            },
+            "modelling": {
+                "col_names_used": ["Product_ID"],
+                "parameters": [],
+                "variables": [],
+                "minimizing_problem": False,
+                "objective_function": "max z",
+                "constraint_functions": ["x <= 10"],
+                "explanation_of_ILP": ["Test"],
+                "readable_documentation": "# Model",
+            },
+        },
+    )
+
+    assert result_state.status == "error"
+    assert result_state.traces[-1] == "scripting:error"
+    assert result_state.execution_metadata[-1].tool_calls == ["ScriptingRecommendation"]
+    notes = result_state.execution_metadata[-1].notes
+    assert any("debug_milestones=csv_resolved,model_request_start,error" in note for note in notes)
+    assert any("debug_model=model=qwen3.6:latest" in note for note in notes)

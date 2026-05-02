@@ -1,0 +1,9 @@
+# Supplemental pip dependencies for the MLflow / OpenAI / GenAI rewrite.
+# Install on top of the conda-lock environment with:
+#     pip install -r requirements-mlflow.txt
+#
+# `mlflow[genai]` pulls in the GenAI extras needed for `mlflow.openai.autolog()`,
+# `mlflow.langchain.autolog()`, the prompt registry (`mlflow.genai.register_prompt`),
+# and `mlflow.genai.evaluate(...)`.
+mlflow[genai]>=2.18.0
+openai>=1.40.0

@@ -1,37 +1,33 @@
 from __future__ import annotations
 
 import argparse
-import importlib
-import json
 import os
+import traceback
 import time
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
 
+import mlflow
 from langgraph.graph import END, START, StateGraph
 
+from agents.shared import classify_exception, load_csv_input_schema
 from schemas.basemodels import (
-    AgentExecutionMetadata,
     AgentError,
+    AgentExecutionMetadata,
     ModellingRecommendation,
     PipelineState,
     PreprocessingRecommendation,
     ScriptingRecommendation,
+    StallReason,
     UseCaseRecommendation,
 )
-from agents.shared import load_csv_input_schema
-
-try:
-    mlflow = importlib.import_module("mlflow")
-except Exception:  # pragma: no cover - optional dependency
-    mlflow = None
 
 
 _STREAM_AGENT_OUTPUT = True
 _STREAM_PIPELINE_PROGRESS = False
+_MLFLOW_BOOTSTRAPPED = False
 
 
 class PipelineStateDict(TypedDict, total=False):
@@ -52,10 +48,19 @@ class PipelineStateDict(TypedDict, total=False):
     llm_config: dict[str, str]
 
 
-
 def _emit_progress(message: str) -> None:
     if _STREAM_PIPELINE_PROGRESS:
         print(f"[pipeline] {message}", flush=True)
+
+
+def _log_traceback_to_mlflow(agent_name: str) -> None:
+    """Persist the active exception traceback as an artifact on the current MLflow run."""
+    try:
+        if mlflow.active_run() is None:
+            return
+        mlflow.log_text(traceback.format_exc(), f"exceptions/{agent_name}.txt")
+    except Exception:
+        pass
 
 
 def _project_root() -> Path:
@@ -64,10 +69,6 @@ def _project_root() -> Path:
 
 def _data_dir() -> Path:
     return _project_root() / "data"
-
-
-def _test_outputs_dir() -> Path:
-    return _project_root() / "TestOutputs"
 
 
 def _resolve_csv_path(csv_file_path: str) -> Path:
@@ -82,253 +83,44 @@ def _resolve_csv_path(csv_file_path: str) -> Path:
     return (_project_root() / csv_file_path).resolve()
 
 
-def _read_text_if_exists(path: Path) -> str:
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8")
+def _setup_mlflow() -> None:
+    """Configure tracking URI, experiment, and enable autologging.
 
+    Idempotent: subsequent calls are no-ops so per-node invocations don't repeatedly
+    re-register autolog hooks during a single pipeline run.
 
-def _serialize_for_log(value: Any) -> str:
-    return json.dumps(value, indent=2, default=str)
-
-
-def _truncate_preview(value: Any, max_chars: int = 1600) -> str:
-    text = _serialize_for_log(value)
-    if len(text) <= max_chars:
-        return text
-    return f"{text[:max_chars]}...<truncated>"
-
-
-def _safe_mlflow_attributes(attributes: dict[str, Any] | None) -> dict[str, Any]:
-    if not attributes:
-        return {}
-
-    safe: dict[str, Any] = {}
-    for key, value in attributes.items():
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            safe[key] = value
-        else:
-            safe[key] = _truncate_preview(value, max_chars=300)
-    return safe
-
-
-def _is_mlflow_enabled() -> bool:
-    return mlflow is not None and os.getenv("MLFLOW_DISABLED", "0") != "1"
-
-
-def _configure_mlflow() -> None:
-    if not _is_mlflow_enabled():
+    We rely *only* on ``mlflow.langchain.autolog()``: it already traces every
+    ``ChatOpenAI`` call (with token usage, inputs and outputs) AND wraps each
+    ``langgraph`` node so the trace tree shows ``modeling > LangGraph > model``,
+    matching the use-case agent. Stacking ``mlflow.openai.autolog()`` on top
+    creates a duplicate ``Completions`` span layer that, combined with
+    ``langgraph``'s parallel tool fanout, could deadlock the agent loop after
+    the parallel tools returned (the next model node never started). Keeping a
+    single tracing layer is sufficient for our goals and stable in practice.
+    """
+    global _MLFLOW_BOOTSTRAPPED
+    if _MLFLOW_BOOTSTRAPPED:
         return
 
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
     if not tracking_uri:
         sqlite_path = (_project_root() / "mlflow.db").resolve().as_posix()
         tracking_uri = f"sqlite:///{sqlite_path}"
-
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "texprompter_pipeline"))
 
-
-@contextmanager
-def _mlflow_run(
-    run_name: str,
-    nested: bool = False,
-    tags: dict[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-):
-    if not _is_mlflow_enabled():
-        yield None
-        return
-
     try:
-        _configure_mlflow()
-        with mlflow.start_run(run_name=run_name, nested=nested):
-            if tags:
-                mlflow.set_tags(tags)
-            if params:
-                safe_params = {key: str(value) for key, value in params.items()}
-                mlflow.log_params(safe_params)
-            yield True
-    except Exception:
-        # Keep pipeline and node tests runnable even if tracking backend is misconfigured.
-        yield None
+        # ``run_tracer_inline=True`` is required when LangGraph fans out parallel
+        # tool calls (which we do in every agent). Without it, the tracer callback
+        # is offloaded to a thread pool and its context never propagates back when
+        # the parallel branches join, leaving the next model node "stuck" with no
+        # new requests sent to Ollama. See:
+        # https://www.mlflow.org/docs/latest/tracing/integrations/langgraph#async-context-propagation
+        mlflow.langchain.autolog(run_tracer_inline=True)
+    except Exception as exc:  # autolog should never break the pipeline
+        print(f"[pipeline] mlflow.langchain.autolog disabled: {exc}", flush=True)
 
-
-def _mlflow_log_json(artifact_file: str, payload: Any) -> None:
-    if not _is_mlflow_enabled():
-        return
-    try:
-        mlflow.log_text(_serialize_for_log(payload), artifact_file)
-    except Exception:
-        # Artifact logging should never break the pipeline.
-        return
-
-
-def _mlflow_log_metrics(metrics: dict[str, float]) -> None:
-    if not _is_mlflow_enabled() or not metrics:
-        return
-    try:
-        mlflow.log_metrics(metrics)
-    except Exception:
-        return
-
-
-def _mlflow_set_tags(tags: dict[str, Any]) -> None:
-    if not _is_mlflow_enabled() or not tags:
-        return
-    try:
-        safe_tags = {key: str(value) for key, value in tags.items()}
-        mlflow.set_tags(safe_tags)
-    except Exception:
-        return
-
-
-def _mlflow_update_trace(
-    *,
-    tags: dict[str, Any] | None = None,
-    metadata: dict[str, Any] | None = None,
-    request_preview: str | None = None,
-    response_preview: str | None = None,
-    state: str | None = None,
-) -> None:
-    if not _is_mlflow_enabled() or not hasattr(mlflow, "update_current_trace"):
-        return
-    try:
-        safe_tags = {key: str(value) for key, value in (tags or {}).items()} or None
-        safe_metadata = {key: str(value) for key, value in (metadata or {}).items()} or None
-        mlflow.update_current_trace(
-            tags=safe_tags,
-            metadata=safe_metadata,
-            request_preview=request_preview,
-            response_preview=response_preview,
-            state=state,
-        )
-    except Exception:
-        return
-
-
-@contextmanager
-def _mlflow_span(
-    name: str,
-    *,
-    span_type: str = "CHAIN",
-    attributes: dict[str, Any] | None = None,
-):
-    if not _is_mlflow_enabled() or not hasattr(mlflow, "start_span"):
-        yield None
-        return
-
-    try:
-        with mlflow.start_span(
-            name=name,
-            span_type=span_type,
-            attributes=_safe_mlflow_attributes(attributes),
-        ) as span:
-            yield span
-    except Exception:
-        yield None
-
-
-def _finalize_span(span: Any, *, status: str, outputs: Any | None = None, error: Exception | None = None) -> None:
-    if span is None:
-        return
-
-    if outputs is not None:
-        try:
-            span.set_outputs(outputs)
-        except Exception:
-            pass
-
-    if error is not None:
-        try:
-            span.record_exception(error)
-        except Exception:
-            pass
-
-    try:
-        span.set_status(status)
-    except Exception:
-        pass
-
-
-def _extract_error_diagnostics(error: Exception) -> tuple[list[str], dict[str, Any]]:
-    tool_calls_raw = getattr(error, "seen_tool_names", [])
-    if isinstance(tool_calls_raw, list):
-        tool_calls = [str(item) for item in tool_calls_raw]
-    else:
-        tool_calls = []
-
-    debug_raw = getattr(error, "debug_trace", {})
-    debug_payload = debug_raw if isinstance(debug_raw, dict) else {}
-    return tool_calls, debug_payload
-
-
-def _append_stage_artifact(
-    state: PipelineState,
-    *,
-    stage_name: str,
-    status: str,
-    tool_trace: list[str],
-    debug_payload: dict[str, Any],
-    error_message: str | None = None,
-) -> dict[str, Any]:
-    attempts = debug_payload.get("attempts", []) if isinstance(debug_payload, dict) else []
-    if not isinstance(attempts, list):
-        attempts = []
-
-    artifact = {
-        "status": status,
-        "tool_trace": tool_trace,
-        "tool_call_count": len(tool_trace),
-        "attempt_count": len(attempts),
-        "debug": debug_payload,
-        "error": error_message,
-        "logged_at": datetime.now(tz=timezone.utc).isoformat(),
-    }
-
-    llm_artifacts = dict(state.llm_artifacts)
-    llm_artifacts[stage_name] = artifact
-    state.llm_artifacts = llm_artifacts
-    return artifact
-
-
-def _log_stage_diagnostics_to_mlflow(
-    *,
-    stage_name: str,
-    status: str,
-    artifact: dict[str, Any],
-) -> None:
-    _mlflow_log_json(f"{stage_name}/llm_diagnostics.json", artifact)
-    _mlflow_set_tags(
-        {
-            "stage": stage_name,
-            f"{stage_name}.status": status,
-            f"{stage_name}.tool_call_count": artifact.get("tool_call_count", 0),
-            f"{stage_name}.attempt_count": artifact.get("attempt_count", 0),
-        }
-    )
-    _mlflow_log_metrics(
-        {
-            f"{stage_name}_tool_call_count": float(artifact.get("tool_call_count", 0)),
-            f"{stage_name}_llm_attempt_count": float(artifact.get("attempt_count", 0)),
-        }
-    )
-    _mlflow_update_trace(
-        tags={"stage": stage_name, "status": status},
-        metadata={
-            "tool_call_count": artifact.get("tool_call_count", 0),
-            "attempt_count": artifact.get("attempt_count", 0),
-        },
-        request_preview=_truncate_preview({"stage": stage_name}),
-        response_preview=_truncate_preview(
-            {
-                "status": status,
-                "tool_trace": artifact.get("tool_trace", []),
-                "error": artifact.get("error"),
-            }
-        ),
-        state=status,
-    )
+    _MLFLOW_BOOTSTRAPPED = True
 
 
 def _record_execution_metadata(
@@ -339,6 +131,9 @@ def _record_execution_metadata(
     status: str,
     tool_calls: list[str] | None = None,
     notes: list[str] | None = None,
+    steps_used: int | None = None,
+    context_chars: int | None = None,
+    prompt_source: str | None = None,
 ) -> None:
     execution_entries = list(state.execution_metadata)
     duration = time.time() - started_at
@@ -353,9 +148,24 @@ def _record_execution_metadata(
             status="ok" if status == "ok" else "error",
             tool_calls=tool_calls or [],
             notes=notes or [],
+            steps_used=steps_used,
+            context_chars=context_chars,
+            prompt_source=prompt_source,
         )
     )
     state.execution_metadata = execution_entries
+
+    # Emit per-agent MLflow metrics so execution data is queryable in the UI.
+    try:
+        if mlflow.active_run() is None:
+            return
+        mlflow.log_metric(f"{agent_name}.duration_seconds", duration)
+        if steps_used is not None:
+            mlflow.log_metric(f"{agent_name}.steps_used", float(steps_used))
+        if context_chars is not None:
+            mlflow.log_metric(f"{agent_name}.context_chars", float(context_chars))
+    except Exception:
+        pass
 
 
 def _infer_objective_direction(text: str) -> str:
@@ -378,6 +188,106 @@ def _extract_result_and_debug(payload: Any) -> tuple[Any, list[str], dict[str, A
             debug_payload = {}
         return result_payload, trace, debug_payload
     return payload, [], {}
+
+
+def _extract_exception_debug(error: Exception) -> tuple[list[str], dict[str, Any]]:
+    tool_trace = getattr(error, "tool_trace", [])
+    debug_payload = getattr(error, "debug", {})
+    if isinstance(tool_trace, list):
+        trace = [str(item) for item in tool_trace]
+    else:
+        trace = []
+    if not isinstance(debug_payload, dict):
+        debug_payload = {}
+    return trace, debug_payload
+
+
+def _debug_notes(debug_payload: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
+    notes.extend(_prompt_notes(debug_payload))
+    milestones = debug_payload.get("milestones")
+    if isinstance(milestones, list) and milestones:
+        events = [
+            str(item.get("event"))
+            for item in milestones
+            if isinstance(item, dict) and item.get("event")
+        ]
+        if events:
+            notes.append(f"debug_milestones={','.join(events)}")
+    model = debug_payload.get("model")
+    if isinstance(model, dict):
+        model_parts = [
+            f"{key}={value}"
+            for key, value in model.items()
+            if value is not None
+        ]
+        if model_parts:
+            notes.append(f"debug_model={';'.join(model_parts)}")
+    return notes
+
+
+def _extract_prompt_metadata(debug_payload: dict[str, Any]) -> dict[str, str]:
+    prompt_payload = debug_payload.get("prompt")
+    if not isinstance(prompt_payload, Mapping):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in prompt_payload.items()
+        if value is not None and key != "template"
+    }
+
+
+def _prompt_notes(debug_payload: dict[str, Any]) -> list[str]:
+    prompt_metadata = _extract_prompt_metadata(debug_payload)
+    if not prompt_metadata:
+        return []
+    notes: list[str] = []
+    uri = prompt_metadata.get("resolved_uri") or prompt_metadata.get("requested_uri")
+    if uri:
+        notes.append(f"prompt_uri={uri}")
+    source = prompt_metadata.get("source")
+    if source:
+        notes.append(f"prompt_source={source}")
+    version = prompt_metadata.get("version")
+    if version:
+        notes.append(f"prompt_version={version}")
+    return notes
+
+
+def _record_prompt_lineage(
+    state: PipelineState,
+    *,
+    stage_name: str,
+    debug_payload: dict[str, Any],
+) -> None:
+    prompt_metadata = _extract_prompt_metadata(debug_payload)
+    if not prompt_metadata:
+        return
+
+    artifacts = dict(state.llm_artifacts)
+    prompts = dict(artifacts.get("prompts", {})) if isinstance(artifacts.get("prompts"), dict) else {}
+    prompts[stage_name] = prompt_metadata
+    artifacts["prompts"] = prompts
+    state.llm_artifacts = artifacts
+
+    try:
+        if mlflow.active_run() is None:
+            return
+        tags: dict[str, str] = {
+            f"prompt.{stage_name}.{key}": value
+            for key, value in prompt_metadata.items()
+            if key in {"registry_name", "requested_uri", "resolved_uri", "version", "source"}
+        }
+        # Log registry miss so fallback rate is queryable per experiment.
+        source = prompt_metadata.get("source", "")
+        if source == "local_file":
+            fallback_reason = prompt_metadata.get("fallback_reason", "")
+            if fallback_reason:
+                tags[f"prompt.{stage_name}.fallback_reason"] = fallback_reason
+            mlflow.log_metric("prompt.registry_miss", 1.0)
+        mlflow.set_tags(tags)
+    except Exception:
+        pass
 
 
 def run_use_case_agent(
@@ -584,90 +494,28 @@ def initialize_node(state: PipelineStateDict) -> PipelineStateDict:
 
     started_at = time.time()
     _emit_progress("initialize:start")
-    with _mlflow_run(
-        "initialize",
-        nested=True,
-        tags={"agent_name": "initialize"},
-        params={
-            "csv_file_path": current_state.csv_file_path,
-            "preview_rows": current_state.preview_rows,
-        },
-    ):
-        with _mlflow_span(
-            "initialize.invoke",
-            span_type="CHAIN",
-            attributes={
-                "stage": "initialize",
-                "csv_file_path": current_state.csv_file_path,
-                "preview_rows": current_state.preview_rows,
-            },
-        ) as span:
-            try:
-                _ensure_input_schema_payload(current_state)
-                _append_trace(current_state, "initialize:ok")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="initialize",
-                    started_at=started_at,
-                    status="ok",
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="initialize",
-                    status="ok",
-                    tool_trace=[],
-                    debug_payload={
-                        "input_schema_keys": sorted(current_state.input_schema_payload.keys()),
-                        "shape": current_state.input_schema_payload.get("shape", {}),
-                    },
-                )
-                _mlflow_log_metrics({"initialize_duration_seconds": float(time.time() - started_at)})
-                _mlflow_log_json("initialize/input_schema_payload.json", current_state.input_schema_payload)
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="initialize",
-                    status="ok",
-                    artifact=stage_artifact,
-                )
-                _finalize_span(
-                    span,
-                    status="OK",
-                    outputs={
-                        "status": "ok",
-                        "input_schema_shape": current_state.input_schema_payload.get("shape", {}),
-                    },
-                )
-                _emit_progress("initialize:ok")
-            except Exception as error:
-                _set_error(current_state, "initialize", error)
-                _append_trace(current_state, "initialize:error")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="initialize",
-                    started_at=started_at,
-                    status="error",
-                    notes=[str(error)],
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="initialize",
-                    status="error",
-                    tool_trace=[],
-                    debug_payload={},
-                    error_message=str(error),
-                )
-                _mlflow_log_json("initialize/error.json", {"error": str(error), "detail": repr(error)})
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="initialize",
-                    status="error",
-                    artifact=stage_artifact,
-                )
-                _finalize_span(
-                    span,
-                    status="ERROR",
-                    outputs={"status": "error", "error": str(error)},
-                    error=error,
-                )
-                _emit_progress(f"initialize:error - {error}")
+    try:
+        _ensure_input_schema_payload(current_state)
+        _append_trace(current_state, "initialize:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="initialize",
+            started_at=started_at,
+            status="ok",
+        )
+        _emit_progress("initialize:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("initialize")
+        _set_error(current_state, "initialize", error)
+        _append_trace(current_state, "initialize:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="initialize",
+            started_at=started_at,
+            status="error",
+            notes=[str(error)],
+        )
+        _emit_progress(f"initialize:error - {error}")
 
     return current_state.model_dump()
 
@@ -678,17 +526,40 @@ def _append_trace(state: PipelineState, trace: str) -> None:
     state.traces = traces
 
 
-def _set_error(state: PipelineState, agent_name: str, error: Exception) -> None:
+def _set_error(
+    state: PipelineState,
+    agent_name: str,
+    error: Exception,
+    *,
+    stall_reason: StallReason | None = None,
+    steps_used: int | None = None,
+    context_chars: int | None = None,
+) -> None:
+    reason = stall_reason if stall_reason is not None else classify_exception(error)
     errors = list(state.errors)
     errors.append(
         AgentError(
             agent_name=agent_name,
             message=str(error),
             detail=repr(error),
+            stall_reason=reason,
+            retry_steps_used=steps_used,
+            context_chars=context_chars,
         )
     )
     state.errors = errors
     state.status = "error"
+
+    # Emit stall classification to MLflow so failure distributions are queryable.
+    try:
+        if mlflow.active_run() is None:
+            return
+        mlflow.log_metric(f"stall.{agent_name}.{reason.value}", 1.0)
+        mlflow.set_tag(f"stall.{agent_name}.reason", reason.value)
+        if steps_used is not None:
+            mlflow.log_metric(f"{agent_name}.steps_used", float(steps_used))
+    except Exception:
+        pass
 
 
 def use_case_node(state: PipelineStateDict) -> PipelineStateDict:
@@ -702,104 +573,38 @@ def use_case_node(state: PipelineStateDict) -> PipelineStateDict:
 
     started_at = time.time()
     _emit_progress("use_case:start")
-    with _mlflow_run(
-        "use_case_agent",
-        nested=True,
-        tags={"agent_name": "use_case_agent", "stage": "use_case"},
-        params={
-            "csv_file_path": current_state.csv_file_path,
-            "preview_rows": current_state.preview_rows,
-        },
-    ):
-        with _mlflow_span(
-            "use_case_agent.invoke",
-            span_type="AGENT",
-            attributes={
-                "stage": "use_case",
-                "csv_file_path": current_state.csv_file_path,
-                "preview_rows": current_state.preview_rows,
-            },
-        ) as span:
-            tool_trace: list[str] = []
-            debug_payload: dict[str, Any] = {}
-            try:
-                payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
-                    run_use_case_agent,
-                    csv_file_path=current_state.csv_file_path,
-                    preview_rows=current_state.preview_rows,
-                )
-                current_state.use_case = UseCaseRecommendation.model_validate(payload)
-                _append_trace(current_state, "use_case:ok")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="use_case_agent",
-                    started_at=started_at,
-                    status="ok",
-                    tool_calls=tool_trace,
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="use_case",
-                    status="ok",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                )
-                _mlflow_log_json("use_case/recommendation.json", current_state.use_case.model_dump())
-                _mlflow_log_json("use_case/tool_trace.json", tool_trace)
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="use_case",
-                    status="ok",
-                    artifact=stage_artifact,
-                )
-                _mlflow_log_metrics({"use_case_duration_seconds": float(time.time() - started_at)})
-                _finalize_span(
-                    span,
-                    status="OK",
-                    outputs={
-                        "status": "ok",
-                        "tool_trace": tool_trace,
-                        "attempt_count": stage_artifact.get("attempt_count", 0),
-                    },
-                )
-                _emit_progress("use_case:ok")
-            except Exception as error:
-                error_tool_trace, error_debug = _extract_error_diagnostics(error)
-                if not tool_trace:
-                    tool_trace = error_tool_trace
-                if not debug_payload:
-                    debug_payload = error_debug
-
-                _set_error(current_state, "use_case_agent", error)
-                _append_trace(current_state, "use_case:error")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="use_case_agent",
-                    started_at=started_at,
-                    status="error",
-                    tool_calls=tool_trace,
-                    notes=[str(error)],
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="use_case",
-                    status="error",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                    error_message=str(error),
-                )
-                _mlflow_log_json("use_case/error.json", {"error": str(error), "detail": repr(error)})
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="use_case",
-                    status="error",
-                    artifact=stage_artifact,
-                )
-                _finalize_span(
-                    span,
-                    status="ERROR",
-                    outputs={"status": "error", "tool_trace": tool_trace, "error": str(error)},
-                    error=error,
-                )
-                _emit_progress(f"use_case:error - {error}")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_use_case_agent,
+            csv_file_path=current_state.csv_file_path,
+            preview_rows=current_state.preview_rows,
+        )
+        current_state.use_case = UseCaseRecommendation.model_validate(payload)
+        _record_prompt_lineage(current_state, stage_name="use_case", debug_payload=debug_payload)
+        _append_trace(current_state, "use_case:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="use_case_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("use_case:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("use_case_agent")
+        _set_error(current_state, "use_case_agent", error)
+        _append_trace(current_state, "use_case:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="use_case_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error)],
+        )
+        _emit_progress(f"use_case:error - {error}")
 
     return current_state.model_dump()
 
@@ -815,110 +620,39 @@ def modeling_node(state: PipelineStateDict) -> PipelineStateDict:
 
     started_at = time.time()
     _emit_progress("modeling:start")
-    with _mlflow_run(
-        "modeling_agent",
-        nested=True,
-        tags={"agent_name": "modeling_agent", "stage": "modeling"},
-        params={
-            "csv_file_path": current_state.csv_file_path,
-            "has_use_case": current_state.use_case is not None,
-        },
-    ):
-        with _mlflow_span(
-            "modeling_agent.invoke",
-            span_type="AGENT",
-            attributes={
-                "stage": "modeling",
-                "csv_file_path": current_state.csv_file_path,
-                "has_use_case": current_state.use_case is not None,
-            },
-        ) as span:
-            tool_trace: list[str] = []
-            debug_payload: dict[str, Any] = {}
-            try:
-                payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
-                    run_modeling_agent,
-                    csv_file_path=current_state.csv_file_path,
-                    use_case=current_state.use_case,
-                    preview_rows=current_state.preview_rows,
-                )
-                current_state.modelling = ModellingRecommendation.model_validate(payload)
-                _append_trace(current_state, "modeling:ok")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="modeling_agent",
-                    started_at=started_at,
-                    status="ok",
-                    tool_calls=tool_trace,
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="modeling",
-                    status="ok",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                )
-                _mlflow_log_json("modeling/recommendation.json", current_state.modelling.model_dump())
-                _mlflow_log_json("modeling/tool_trace.json", tool_trace)
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="modeling",
-                    status="ok",
-                    artifact=stage_artifact,
-                )
-                _mlflow_log_metrics(
-                    {
-                        "modeling_duration_seconds": float(time.time() - started_at),
-                        "constraint_count": float(len(current_state.modelling.constraint_functions)),
-                    }
-                )
-                _finalize_span(
-                    span,
-                    status="OK",
-                    outputs={
-                        "status": "ok",
-                        "tool_trace": tool_trace,
-                        "constraint_count": len(current_state.modelling.constraint_functions),
-                    },
-                )
-                _emit_progress("modeling:ok")
-            except Exception as error:
-                error_tool_trace, error_debug = _extract_error_diagnostics(error)
-                if not tool_trace:
-                    tool_trace = error_tool_trace
-                if not debug_payload:
-                    debug_payload = error_debug
-
-                _set_error(current_state, "modeling_agent", error)
-                _append_trace(current_state, "modeling:error")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="modeling_agent",
-                    started_at=started_at,
-                    status="error",
-                    tool_calls=tool_trace,
-                    notes=[str(error)],
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="modeling",
-                    status="error",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                    error_message=str(error),
-                )
-                _mlflow_log_json("modeling/error.json", {"error": str(error), "detail": repr(error)})
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="modeling",
-                    status="error",
-                    artifact=stage_artifact,
-                )
-                _finalize_span(
-                    span,
-                    status="ERROR",
-                    outputs={"status": "error", "tool_trace": tool_trace, "error": str(error)},
-                    error=error,
-                )
-                _emit_progress(f"modeling:error - {error}")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_modeling_agent,
+            csv_file_path=current_state.csv_file_path,
+            use_case=current_state.use_case,
+            preview_rows=current_state.preview_rows,
+        )
+        current_state.modelling = ModellingRecommendation.model_validate(payload)
+        _record_prompt_lineage(current_state, stage_name="modeling", debug_payload=debug_payload)
+        _append_trace(current_state, "modeling:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="modeling_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("modeling:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("modeling_agent")
+        _set_error(current_state, "modeling_agent", error)
+        _append_trace(current_state, "modeling:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="modeling_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error)],
+        )
+        _emit_progress(f"modeling:error - {error}")
 
     return current_state.model_dump()
 
@@ -934,115 +668,41 @@ def preprocessing_node(state: PipelineStateDict) -> PipelineStateDict:
 
     started_at = time.time()
     _emit_progress("preprocessing:start")
-    with _mlflow_run(
-        "preprocessing_agent",
-        nested=True,
-        tags={"agent_name": "preprocessing_agent", "stage": "preprocessing"},
-        params={
-            "csv_file_path": current_state.csv_file_path,
-            "has_modelling": current_state.modelling is not None,
-            "has_use_case": current_state.use_case is not None,
-        },
-    ):
-        with _mlflow_span(
-            "preprocessing_agent.invoke",
-            span_type="AGENT",
-            attributes={
-                "stage": "preprocessing",
-                "csv_file_path": current_state.csv_file_path,
-                "has_modelling": current_state.modelling is not None,
-            },
-        ) as span:
-            tool_trace: list[str] = []
-            debug_payload: dict[str, Any] = {}
-            try:
-                payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
-                    run_preprocessing_agent,
-                    csv_file_path=current_state.csv_file_path,
-                    use_case=current_state.use_case,
-                    modelling=current_state.modelling,
-                    input_schema_payload=current_state.input_schema_payload,
-                    preview_rows=current_state.preview_rows,
-                )
-                current_state.preprocessing = PreprocessingRecommendation.model_validate(payload)
-                _append_trace(current_state, "preprocessing:ok")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="preprocessing_agent",
-                    started_at=started_at,
-                    status="ok",
-                    tool_calls=tool_trace,
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="preprocessing",
-                    status="ok",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                )
-                _mlflow_log_json(
-                    "preprocessing/recommendation.json",
-                    current_state.preprocessing.model_dump(),
-                )
-                _mlflow_log_json("preprocessing/tool_trace.json", tool_trace)
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="preprocessing",
-                    status="ok",
-                    artifact=stage_artifact,
-                )
-                _mlflow_log_metrics(
-                    {"preprocessing_duration_seconds": float(time.time() - started_at)}
-                )
-                _finalize_span(
-                    span,
-                    status="OK",
-                    outputs={
-                        "status": "ok",
-                        "tool_trace": tool_trace,
-                        "attempt_count": stage_artifact.get("attempt_count", 0),
-                    },
-                )
-                _emit_progress("preprocessing:ok")
-            except Exception as error:
-                error_tool_trace, error_debug = _extract_error_diagnostics(error)
-                if not tool_trace:
-                    tool_trace = error_tool_trace
-                if not debug_payload:
-                    debug_payload = error_debug
-
-                _set_error(current_state, "preprocessing_agent", error)
-                _append_trace(current_state, "preprocessing:error")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="preprocessing_agent",
-                    started_at=started_at,
-                    status="error",
-                    tool_calls=tool_trace,
-                    notes=[str(error)],
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="preprocessing",
-                    status="error",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                    error_message=str(error),
-                )
-                _mlflow_log_json(
-                    "preprocessing/error.json", {"error": str(error), "detail": repr(error)}
-                )
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="preprocessing",
-                    status="error",
-                    artifact=stage_artifact,
-                )
-                _finalize_span(
-                    span,
-                    status="ERROR",
-                    outputs={"status": "error", "tool_trace": tool_trace, "error": str(error)},
-                    error=error,
-                )
-                _emit_progress(f"preprocessing:error - {error}")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_preprocessing_agent,
+            csv_file_path=current_state.csv_file_path,
+            use_case=current_state.use_case,
+            modelling=current_state.modelling,
+            input_schema_payload=current_state.input_schema_payload,
+            preview_rows=current_state.preview_rows,
+        )
+        current_state.preprocessing = PreprocessingRecommendation.model_validate(payload)
+        _record_prompt_lineage(current_state, stage_name="preprocessing", debug_payload=debug_payload)
+        _append_trace(current_state, "preprocessing:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="preprocessing_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("preprocessing:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("preprocessing_agent")
+        _set_error(current_state, "preprocessing_agent", error)
+        _append_trace(current_state, "preprocessing:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="preprocessing_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error)],
+        )
+        _emit_progress(f"preprocessing:error - {error}")
 
     return current_state.model_dump()
 
@@ -1058,148 +718,62 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
 
     started_at = time.time()
     _emit_progress("scripting:start")
-    with _mlflow_run(
-        "scripting_agent",
-        nested=True,
-        tags={"agent_name": "scripting_agent", "stage": "scripting"},
-        params={
-            "csv_file_path": current_state.csv_file_path,
-            "has_modelling": current_state.modelling is not None,
-            "has_preprocessing": current_state.preprocessing is not None,
-        },
-    ):
-        with _mlflow_span(
-            "scripting_agent.invoke",
-            span_type="AGENT",
-            attributes={
-                "stage": "scripting",
-                "csv_file_path": current_state.csv_file_path,
-                "has_modelling": current_state.modelling is not None,
-                "has_preprocessing": current_state.preprocessing is not None,
-            },
-        ) as span:
-            tool_trace: list[str] = []
-            debug_payload: dict[str, Any] = {}
-            try:
-                payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
-                    run_scripting_agent,
-                    csv_file_path=current_state.csv_file_path,
-                    modelling=current_state.modelling,
-                    preprocessing=current_state.preprocessing,
-                    input_schema_payload=current_state.input_schema_payload,
-                    preview_rows=current_state.preview_rows,
-                )
-                current_state.scripting = ScriptingRecommendation.model_validate(payload)
-                if current_state.scripting.successful_implementation:
-                    _append_trace(current_state, "scripting:ok")
-                    _record_execution_metadata(
-                        current_state,
-                        agent_name="scripting_agent",
-                        started_at=started_at,
-                        status="ok",
-                        tool_calls=tool_trace,
-                    )
-                    stage_artifact = _append_stage_artifact(
-                        current_state,
-                        stage_name="scripting",
-                        status="ok",
-                        tool_trace=tool_trace,
-                        debug_payload=debug_payload,
-                    )
-                    _mlflow_log_json("scripting/recommendation.json", current_state.scripting.model_dump())
-                    _mlflow_log_json("scripting/tool_trace.json", tool_trace)
-                    _log_stage_diagnostics_to_mlflow(
-                        stage_name="scripting",
-                        status="ok",
-                        artifact=stage_artifact,
-                    )
-                    _mlflow_log_metrics({"scripting_duration_seconds": float(time.time() - started_at)})
-                    _finalize_span(
-                        span,
-                        status="OK",
-                        outputs={
-                            "status": "ok",
-                            "tool_trace": tool_trace,
-                            "successful_implementation": True,
-                        },
-                    )
-                    _emit_progress("scripting:ok")
-                else:
-                    detail = "; ".join(current_state.scripting.additional_info).strip()
-                    if not detail:
-                        detail = "Scripting agent returned successful_implementation=False."
-                    invalid_error = ValueError(detail)
-                    _set_error(current_state, "scripting_agent", invalid_error)
-                    _append_trace(current_state, "scripting:invalid")
-                    _record_execution_metadata(
-                        current_state,
-                        agent_name="scripting_agent",
-                        started_at=started_at,
-                        status="error",
-                        tool_calls=tool_trace,
-                        notes=[detail],
-                    )
-                    stage_artifact = _append_stage_artifact(
-                        current_state,
-                        stage_name="scripting",
-                        status="error",
-                        tool_trace=tool_trace,
-                        debug_payload=debug_payload,
-                        error_message=detail,
-                    )
-                    _mlflow_log_json(
-                        "scripting/error.json", {"error": detail, "detail": "successful_implementation=False"}
-                    )
-                    _log_stage_diagnostics_to_mlflow(
-                        stage_name="scripting",
-                        status="error",
-                        artifact=stage_artifact,
-                    )
-                    _finalize_span(
-                        span,
-                        status="ERROR",
-                        outputs={"status": "error", "tool_trace": tool_trace, "error": detail},
-                        error=invalid_error,
-                    )
-                    _emit_progress(f"scripting:invalid - {detail}")
-            except Exception as error:
-                error_tool_trace, error_debug = _extract_error_diagnostics(error)
-                if not tool_trace:
-                    tool_trace = error_tool_trace
-                if not debug_payload:
-                    debug_payload = error_debug
-
-                _set_error(current_state, "scripting_agent", error)
-                _append_trace(current_state, "scripting:error")
-                _record_execution_metadata(
-                    current_state,
-                    agent_name="scripting_agent",
-                    started_at=started_at,
-                    status="error",
-                    tool_calls=tool_trace,
-                    notes=[str(error)],
-                )
-                stage_artifact = _append_stage_artifact(
-                    current_state,
-                    stage_name="scripting",
-                    status="error",
-                    tool_trace=tool_trace,
-                    debug_payload=debug_payload,
-                    error_message=str(error),
-                )
-                _mlflow_log_json("scripting/error.json", {"error": str(error), "detail": repr(error)})
-                _log_stage_diagnostics_to_mlflow(
-                    stage_name="scripting",
-                    status="error",
-                    artifact=stage_artifact,
-                )
-                _finalize_span(
-                    span,
-                    status="ERROR",
-                    outputs={"status": "error", "tool_trace": tool_trace, "error": str(error)},
-                    error=error,
-                )
-                _emit_progress(f"scripting:error - {error}")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_scripting_agent,
+            csv_file_path=current_state.csv_file_path,
+            modelling=current_state.modelling,
+            preprocessing=current_state.preprocessing,
+            input_schema_payload=current_state.input_schema_payload,
+            preview_rows=current_state.preview_rows,
+        )
+        current_state.scripting = ScriptingRecommendation.model_validate(payload)
+        _record_prompt_lineage(current_state, stage_name="scripting", debug_payload=debug_payload)
+        if current_state.scripting.successful_implementation:
+            _append_trace(current_state, "scripting:ok")
+            _record_execution_metadata(
+                current_state,
+                agent_name="scripting_agent",
+                started_at=started_at,
+                status="ok",
+                tool_calls=tool_trace,
+                notes=_debug_notes(debug_payload),
+            )
+            _emit_progress("scripting:ok")
+        else:
+            detail = "; ".join(current_state.scripting.additional_info).strip()
+            if not detail:
+                detail = "Scripting agent returned successful_implementation=False."
+            invalid_error = ValueError(detail)
+            _set_error(current_state, "scripting_agent", invalid_error)
+            _append_trace(current_state, "scripting:invalid")
+            _record_execution_metadata(
+                current_state,
+                agent_name="scripting_agent",
+                started_at=started_at,
+                status="error",
+                tool_calls=tool_trace,
+                notes=[detail, *_debug_notes(debug_payload)],
+            )
+            _emit_progress(f"scripting:invalid - {detail}")
+    except Exception as error:
+        _log_traceback_to_mlflow("scripting_agent")
+        exception_tool_trace, debug_payload = _extract_exception_debug(error)
+        if exception_tool_trace:
+            tool_trace = exception_tool_trace
+        _record_prompt_lineage(current_state, stage_name="scripting", debug_payload=debug_payload)
+        _set_error(current_state, "scripting_agent", error)
+        _append_trace(current_state, "scripting:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="scripting_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error), *_debug_notes(debug_payload)],
+        )
+        _emit_progress(f"scripting:error - {error}")
 
     return current_state.model_dump()
 
@@ -1310,7 +884,7 @@ def run_pipeline(
 ) -> PipelineState:
     global _STREAM_AGENT_OUTPUT, _STREAM_PIPELINE_PROGRESS
 
-    _configure_mlflow()
+    _setup_mlflow()
     graph = build_pipeline_graph()
     initial_state = PipelineState(
         csv_file_path=csv_file_path,
@@ -1321,101 +895,57 @@ def run_pipeline(
     previous_stream_pipeline_progress = _STREAM_PIPELINE_PROGRESS
     _STREAM_AGENT_OUTPUT = stream_pipeline_output
     _STREAM_PIPELINE_PROGRESS = stream_pipeline_output
+    prev_llm_stream_env = os.environ.get("OLLAMA_STREAM_STDOUT") if stream_pipeline_output else None
+    if stream_pipeline_output:
+        os.environ["OLLAMA_STREAM_STDOUT"] = "1"
     try:
         run_name = f"pipeline_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        with _mlflow_run(
-            run_name,
-            nested=False,
-            tags={"component": "orchestrator.pipeline"},
-            params={"csv_file_path": csv_file_path, "preview_rows": preview_rows},
-        ):
-            with _mlflow_span(
-                "pipeline.execute",
-                span_type="CHAIN",
-                attributes={
+        mlflow_run_started = False
+        mlflow_status = "FAILED"
+        try:
+            active_parent_run = mlflow.active_run()
+            start_run_kwargs: dict[str, Any] = {"run_name": run_name}
+            if active_parent_run is not None:
+                start_run_kwargs["nested"] = True
+            mlflow.start_run(**start_run_kwargs)
+            mlflow_run_started = True
+            mlflow.set_tags(
+                {
+                    "component": "orchestrator.pipeline",
+                    "pipeline.csv_file_path": csv_file_path,
+                }
+            )
+            mlflow.log_params(
+                {
                     "csv_file_path": csv_file_path,
                     "preview_rows": preview_rows,
-                    "stream_pipeline_output": stream_pipeline_output,
-                },
-            ) as span:
-                started_at = time.time()
-                try:
-                    if stream_pipeline_output:
-                        final_state = _run_pipeline_with_streaming(graph, initial_state)
-                    else:
-                        result = graph.invoke(initial_state.model_dump())
-                        final_state = PipelineState.model_validate(result)
+                    "ollama_request_timeout_s": os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600"),
+                    "ollama_max_tokens": os.getenv("OLLAMA_MAX_TOKENS", "unset"),
+                    "agent_recursion_limit": os.getenv("AGENT_RECURSION_LIMIT", "12"),
+                    "scripting_max_context_chars": os.getenv("SCRIPTING_MAX_CONTEXT_CHARS", "24000"),
+                }
+            )
 
-                    total_duration = float(time.time() - started_at)
-                    _mlflow_log_metrics(
-                        {
-                            "total_duration_seconds": total_duration,
-                            "errors_count": float(len(final_state.errors)),
-                            "completed_trace_count": float(len(final_state.traces)),
-                            "execution_metadata_count": float(len(final_state.execution_metadata)),
-                            "llm_artifact_stage_count": float(len(final_state.llm_artifacts)),
-                        }
-                    )
-                    _mlflow_set_tags(
-                        {
-                            "pipeline.status": final_state.status,
-                            "pipeline.csv_file_path": final_state.csv_file_path,
-                            "pipeline.error_count": len(final_state.errors),
-                        }
-                    )
-                    _mlflow_log_json("pipeline/final_state.json", final_state.model_dump())
-                    _mlflow_log_json(
-                        "pipeline/execution_metadata.json",
-                        [entry.model_dump() for entry in final_state.execution_metadata],
-                    )
-                    _mlflow_log_json("pipeline/llm_artifacts.json", final_state.llm_artifacts)
-                    _mlflow_log_json(
-                        "pipeline/errors.json",
-                        [entry.model_dump() for entry in final_state.errors],
-                    )
-                    _mlflow_update_trace(
-                        tags={"component": "orchestrator.pipeline"},
-                        metadata={
-                            "status": final_state.status,
-                            "error_count": len(final_state.errors),
-                            "trace_count": len(final_state.traces),
-                        },
-                        request_preview=_truncate_preview(
-                            {
-                                "csv_file_path": csv_file_path,
-                                "preview_rows": preview_rows,
-                                "stream_pipeline_output": stream_pipeline_output,
-                            }
-                        ),
-                        response_preview=_truncate_preview(
-                            {
-                                "status": final_state.status,
-                                "errors": [entry.model_dump() for entry in final_state.errors],
-                                "traces": final_state.traces,
-                            }
-                        ),
-                        state=final_state.status,
-                    )
-                    _finalize_span(
-                        span,
-                        status="OK",
-                        outputs={
-                            "status": final_state.status,
-                            "error_count": len(final_state.errors),
-                            "trace_count": len(final_state.traces),
-                        },
-                    )
-                    return final_state
-                except Exception as error:
-                    _mlflow_log_json("pipeline/error.json", {"error": str(error), "detail": repr(error)})
-                    _finalize_span(
-                        span,
-                        status="ERROR",
-                        outputs={"status": "error", "error": str(error)},
-                        error=error,
-                    )
-                    raise
+            if stream_pipeline_output:
+                final_state = _run_pipeline_with_streaming(graph, initial_state)
+            else:
+                result = graph.invoke(initial_state.model_dump())
+                final_state = PipelineState.model_validate(result)
+
+            mlflow.set_tag("pipeline.status", final_state.status)
+            mlflow.log_metric("errors_count", float(len(final_state.errors)))
+            mlflow.log_metric("trace_count", float(len(final_state.traces)))
+            mlflow_status = "FINISHED" if final_state.status == "ok" else "FAILED"
+            return final_state
+        finally:
+            if mlflow_run_started:
+                mlflow.end_run(status=mlflow_status)
     finally:
+        if stream_pipeline_output:
+            if prev_llm_stream_env is None:
+                os.environ.pop("OLLAMA_STREAM_STDOUT", None)
+            else:
+                os.environ["OLLAMA_STREAM_STDOUT"] = prev_llm_stream_env
         _STREAM_AGENT_OUTPUT = previous_stream_agent_output
         _STREAM_PIPELINE_PROGRESS = previous_stream_pipeline_progress
 
@@ -1446,7 +976,7 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--stream-pipeline-output",
         action="store_true",
-        help="Stream per-node pipeline progress and agent output while running.",
+        help="Stream per-node pipeline progress; also enables live LLM token streaming (stdout).",
     )
     return parser.parse_args()
 

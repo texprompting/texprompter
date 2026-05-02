@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import warnings
 from pathlib import Path
 from typing import Any
 
 from langchain.agents import create_agent
-from langchain_core.tools import tool
+from langchain.agents.structured_output import ToolStrategy
+from pydantic import BaseModel
 
+from agents.prompts import load_system_prompt_result
 from agents.shared import (
-    build_ollama_model,
+    _last_ai_content,
+    build_chat_model,
+    extract_tool_trace,
     get_data_dir,
     get_test_outputs_dir,
-    invoke_structured_agent,
+    invoke_agent_with_prompt_trace,
     load_csv_input_schema,
+    prompt_debug_payload,
 )
 from schemas.basemodels import (
     ModellingRecommendation,
@@ -24,6 +30,30 @@ from schemas.basemodels import (
 
 
 warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
+
+
+# Maximum number of characters allowed in the scripting agent's user message.
+# When the assembled context exceeds this limit, sections are dropped in order:
+# 1. input_schema_payload (largest, least essential to the solver logic)
+# 2. preprocessing.mapper_script (large, but already summarised by mapping_notes)
+# 3. mathematical_model.readable_documentation (verbose; objective + constraints remain)
+# Set SCRIPTING_MAX_CONTEXT_CHARS=0 to disable truncation entirely.
+_SCRIPTING_MAX_CONTEXT_CHARS = int(os.getenv("SCRIPTING_MAX_CONTEXT_CHARS", "24000"))
+
+
+class ScriptingAgentError(RuntimeError):
+    """Error raised with partial debug context from the scripting agent."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        debug: dict[str, Any],
+        tool_trace: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.debug = debug
+        self.tool_trace = tool_trace or []
 
 
 def _resolve_csv_path(csv_file_path: str) -> Path:
@@ -77,6 +107,130 @@ def _build_math_payload(modelling: ModellingRecommendation | dict[str, Any] | No
     }
 
 
+def _coerce_recommendation(value: Any) -> ScriptingRecommendation:
+    if isinstance(value, ScriptingRecommendation):
+        return value
+    if isinstance(value, BaseModel):
+        return ScriptingRecommendation.model_validate(value.model_dump())
+    if isinstance(value, dict):
+        return ScriptingRecommendation.model_validate(value)
+    raise TypeError(f"Unexpected structured_response type: {type(value)!r}")
+
+
+def _requested_output_schema() -> dict[str, str]:
+    return {
+        "solution_status": "str",
+        "objective_value": "float",
+        "decision_variables": "dict[str, float]",
+        "solver_message": "str",
+    }
+
+
+def _preprocessing_payload(
+    preprocessing: PreprocessingRecommendation | dict[str, Any] | None,
+) -> dict[str, Any]:
+    if preprocessing is None:
+        return {}
+    if isinstance(preprocessing, PreprocessingRecommendation):
+        return {
+            "mapper_script": preprocessing.mapper_script,
+            "mapping_notes": preprocessing.mapping_notes,
+            "assumptions": preprocessing.assumptions,
+        }
+    preprocessing_dict = dict(preprocessing)
+    return {
+        "mapper_script": str(preprocessing_dict.get("mapper_script", "")),
+        "mapping_notes": list(preprocessing_dict.get("mapping_notes", [])),
+        "assumptions": list(preprocessing_dict.get("assumptions", [])),
+    }
+
+
+def _build_scripting_context(
+    *,
+    csv_path: Path,
+    schema_payload: dict[str, Any],
+    modelling: ModellingRecommendation | dict[str, Any] | None,
+    preprocessing: PreprocessingRecommendation | dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "csv_file_path": str(csv_path),
+        "mathematical_model": _build_math_payload(modelling)["mathematical_model"],
+        "input_schema_payload": schema_payload,
+        "preprocessing": _preprocessing_payload(preprocessing),
+        "requested_output_schema": _requested_output_schema(),
+    }
+
+
+def _json_context(context: dict[str, Any]) -> str:
+    return json.dumps(context, ensure_ascii=True, sort_keys=True)
+
+
+def _truncate_scripting_context(
+    context: dict[str, Any],
+    *,
+    max_chars: int,
+    debug: dict[str, Any],
+    add_milestone: Any,
+) -> tuple[dict[str, Any], str]:
+    """Trim the scripting context so that its JSON representation fits within ``max_chars``.
+
+    Sections are dropped in priority order (cheapest to lose first):
+    1. ``input_schema_payload`` – large, already encoded in the preprocessing script
+    2. ``preprocessing.mapper_script`` – verbose; mapping_notes summarise intent
+    3. ``mathematical_model.readable_documentation`` – objective + constraints remain
+
+    Each truncation is recorded as a debug milestone and an MLflow tag so operators
+    can identify which runs were affected and by how much.
+    """
+    import copy
+
+    ctx = copy.deepcopy(context)
+    truncations: list[str] = []
+
+    def _fits() -> bool:
+        return max_chars <= 0 or len(_json_context(ctx)) <= max_chars
+
+    if not _fits():
+        ctx["input_schema_payload"] = {"truncated": True, "reason": "context_size_limit"}
+        truncations.append("input_schema_payload")
+
+    if not _fits():
+        preprocessing = ctx.get("preprocessing", {})
+        if isinstance(preprocessing, dict) and preprocessing.get("mapper_script"):
+            preprocessing["mapper_script"] = (
+                "# truncated: see mapping_notes for intent"
+            )
+            ctx["preprocessing"] = preprocessing
+            truncations.append("preprocessing.mapper_script")
+
+    if not _fits():
+        math_model = ctx.get("mathematical_model", {})
+        if isinstance(math_model, dict) and math_model.get("readable_documentation"):
+            math_model["readable_documentation"] = (
+                "# truncated: see objective_function and constraint_functions"
+            )
+            ctx["mathematical_model"] = math_model
+            truncations.append("mathematical_model.readable_documentation")
+
+    if truncations:
+        add_milestone(
+            "context_truncated",
+            truncated_sections=truncations,
+            original_chars=len(_json_context(context)),
+            truncated_chars=len(_json_context(ctx)),
+        )
+        debug["context_truncations"] = truncations
+        try:
+            import mlflow
+            if mlflow.active_run():
+                mlflow.set_tag("scripting.context_truncated", ",".join(truncations))
+                mlflow.log_metric("scripting.context_chars_truncated", len(_json_context(context)))
+        except Exception:
+            pass
+
+    return ctx, _json_context(ctx)
+
+
 def run_pulp_coding_agent(
     csv_file_path: str | None = None,
     modelling: ModellingRecommendation | dict[str, Any] | None = None,
@@ -86,11 +240,24 @@ def run_pulp_coding_agent(
     return_debug: bool = False,
 ) -> dict[str, Any]:
     """Generate PuLP code from state-driven modelling and preprocessing context."""
+    started_at = time.time()
+    debug: dict[str, Any] = {"milestones": []}
+    tool_trace: list[str] = []
+
+    def add_milestone(event: str, **details: Any) -> None:
+        entry = {
+            "event": event,
+            "elapsed_seconds": round(time.time() - started_at, 3),
+        }
+        entry.update(details)
+        debug["milestones"].append(entry)
+
     resolved_csv_path = _resolve_csv_path(
         csv_file_path or os.getenv("PIPELINE_CSV_PATH", "optimization_pipeline_test_easy.csv")
     )
     if not resolved_csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+    add_milestone("csv_resolved", csv_file_path=str(resolved_csv_path))
 
     if input_schema_payload is not None:
         schema_payload = input_schema_payload
@@ -100,64 +267,87 @@ def run_pulp_coding_agent(
         schema_payload = dict(preprocessing).get("input_schema_payload", {})
     else:
         schema_payload = load_csv_input_schema(str(resolved_csv_path), preview_rows)
+    add_milestone(
+        "context_built",
+        schema_columns=len(schema_payload.get("columns", [])),
+        schema_rows=schema_payload.get("shape", {}).get("rows"),
+    )
 
-    @tool
-    def get_input_schema_payload() -> dict[str, Any]:
-        """Returns the input schema payload for solver generation."""
-        return schema_payload
+    scripting_context = _build_scripting_context(
+        csv_path=resolved_csv_path,
+        schema_payload=schema_payload,
+        modelling=modelling,
+        preprocessing=preprocessing,
+    )
 
-    @tool
-    def get_mathematical_model() -> dict[str, Any]:
-        """Returns the upstream mathematical model contract."""
-        return _build_math_payload(modelling)
+    # Truncate context if it exceeds the configured limit (schema → mapper → math docs).
+    scripting_context, context_json = _truncate_scripting_context(
+        scripting_context,
+        max_chars=_SCRIPTING_MAX_CONTEXT_CHARS,
+        debug=debug,
+        add_milestone=add_milestone,
+    )
 
-    @tool
-    def get_requested_output_schema() -> dict[str, str]:
-        """Returns required output payload fields for the generated solver."""
-        return {
-            "solution_status": "str",
-            "objective_value": "float",
-            "decision_variables": "dict[str, float]",
-            "solver_message": "str",
+    user_message = (
+        "Generate complete Python PuLP code, declared output schema, and execution notes "
+        "from this JSON context. Use only the provided context; do not request tools.\n\n"
+        f"{context_json}"
+    )
+
+    try:
+        add_milestone("prompt_load_start")
+        prompt = load_system_prompt_result("scripting")
+        debug["prompt"] = prompt_debug_payload(prompt)
+        add_milestone("prompt_loaded", prompt_chars=len(prompt.template))
+
+        add_milestone("model_build_start")
+        model = build_chat_model()
+        debug["model"] = {
+            "model": getattr(model, "model_name", None) or getattr(model, "model", None),
+            "timeout": getattr(model, "request_timeout", None),
+            "max_retries": getattr(model, "max_retries", None),
+            "max_tokens": getattr(model, "max_tokens", None),
         }
+        add_milestone("model_built")
 
-    llm = build_ollama_model()
-    agent = create_agent(
-        model=llm,
-        tools=[get_mathematical_model, get_input_schema_payload, get_requested_output_schema],
-        system_prompt=(
-            "You are a PuLP MILP coding agent. Convert the provided mathematical model to runnable PuLP code.\n\n"
-            "Required workflow:\n"
-            "1. Call get_mathematical_model\n"
-            "2. Call get_input_schema_payload\n"
-            "3. Call get_requested_output_schema\n"
-            "4. Return ScriptingRecommendation only via tool call\n\n"
-            "Rules:\n"
-            "- Keep the model linear\n"
-            "- Preserve all constraints from the mathematical model\n"
-            "- Do not output plain text as final answer\n"
-        ),
-        response_format=ScriptingRecommendation,
-    )
+        agent = create_agent(
+            model=model,
+            tools=[],
+            system_prompt=prompt.template,
+            response_format=ToolStrategy(ScriptingRecommendation, handle_errors=False),
+        )
 
-    tool_trace: list[str] = []
-    debug_trace: dict[str, Any] = {}
-    args = invoke_structured_agent(
-        agent=agent,
-        user_input=(
-            "Generate complete Python PuLP code, declared output schema, and execution notes from tool inputs."
-        ),
-        response_tool_name="ScriptingRecommendation",
-        retry_message=(
-            "You failed to output ScriptingRecommendation correctly. Return only a valid "
-            "ScriptingRecommendation tool call with all required fields."
-        ),
-        response_model=ScriptingRecommendation,
-        tool_trace=tool_trace,
-        debug_trace=debug_trace,
-    )
+        add_milestone(
+            "model_request_start",
+            context_chars=len(user_message),
+            response_strategy="tool_strategy_no_retry",
+        )
+        response = invoke_agent_with_prompt_trace(
+            agent,
+            stage="scripting",
+            prompt=prompt,
+            user_message=user_message,
+            metadata={"response_strategy": "tool_strategy_no_retry"},
+        )
+        add_milestone("model_request_complete")
+        tool_trace = extract_tool_trace(response.get("messages", []))
 
-    recommendation = ScriptingRecommendation.model_validate(args)
+        structured = response.get("structured_response")
+        if structured is None:
+            # Fallback: attempt to parse the last AI message text as JSON.
+            last_content = _last_ai_content(response.get("messages", []))
+            if last_content:
+                try:
+                    structured = ScriptingRecommendation.model_validate_json(last_content)
+                except Exception:
+                    pass
+        if structured is None:
+            raise ValueError("scripting agent did not produce a structured_response.")
+    except Exception as error:
+        add_milestone("error", error_type=type(error).__name__, error=str(error))
+        raise ScriptingAgentError(str(error), debug=debug, tool_trace=tool_trace) from error
+
+    recommendation = _coerce_recommendation(structured)
     additional_info = list(recommendation.additional_info)
     try:
         compile(recommendation.code, "generated_pulp_model.py", "exec")
@@ -171,14 +361,21 @@ def run_pulp_coding_agent(
         )
 
     output_path = get_test_outputs_dir() / "generated_pulp_model.py"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(recommendation.code, encoding="utf-8")
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(recommendation.code, encoding="utf-8")
+    except OSError as io_err:
+        warnings.warn(
+            f"generated_pulp_model.py write failed (non-fatal): {io_err}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     if return_debug:
         return {
             "result": recommendation.model_dump(),
             "tool_trace": tool_trace,
-            "debug": debug_trace,
+            "debug": debug,
         }
     return recommendation.model_dump()
 

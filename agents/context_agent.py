@@ -9,9 +9,18 @@ from typing import Any
 import pandas as pd
 from langchain.agents import create_agent
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from agents.shared import build_ollama_model, get_data_dir, invoke_structured_agent
+from agents.prompts import load_system_prompt_result
+from agents.shared import (
+    _last_ai_content,
+    build_chat_model,
+    extract_tool_trace,
+    get_data_dir,
+    invoke_agent_with_prompt_trace,
+    prompt_debug_payload,
+)
+from schemas.basemodels import _coerce_json_collection
 
 
 warnings.filterwarnings("ignore", category=UserWarning, module="langchain_core")
@@ -25,6 +34,11 @@ class ContextRecommendation(BaseModel):
     statistics: str = Field(description="RAW statistical summary from tool")
     reasoning: str = Field(description="Why this use case was chosen")
 
+    @field_validator("decision_variables", "relevant_columns", mode="before")
+    @classmethod
+    def _coerce_list_fields(cls, value: Any) -> Any:
+        return _coerce_json_collection(value)
+
 
 def _resolve_csv_path(csv_file_path: str) -> Path:
     csv_path = Path(csv_file_path)
@@ -36,6 +50,16 @@ def _resolve_csv_path(csv_file_path: str) -> Path:
         return data_path
 
     return csv_path.resolve()
+
+
+def _coerce_recommendation(value: Any) -> ContextRecommendation:
+    if isinstance(value, ContextRecommendation):
+        return value
+    if isinstance(value, BaseModel):
+        return ContextRecommendation.model_validate(value.model_dump())
+    if isinstance(value, dict):
+        return ContextRecommendation.model_validate(value)
+    raise TypeError(f"Unexpected structured_response type: {type(value)!r}")
 
 
 def run_context_agent(
@@ -67,42 +91,41 @@ def run_context_agent(
         """Returns statistical summary."""
         return {"raw_stats": df.describe(include="all").to_string()}
 
-    llm = build_ollama_model()
+    prompt = load_system_prompt_result("use_case")
     agent = create_agent(
-        model=llm,
+        model=build_chat_model(),
         tools=[get_column_names, get_csv_preview, get_basic_stats],
-        system_prompt=(
-            "You are an expert in operations research and production optimization.\n\n"
-            "Workflow (strict):\n"
-            "1. Call get_csv_preview\n"
-            "2. Call get_column_names\n"
-            "3. Call get_basic_stats\n"
-            "4. Return ContextRecommendation only via tool call\n\n"
-            "Rules:\n"
-            "- Do not output plain text or manual JSON\n"
-            "- statistics must copy raw_stats exactly\n"
-            "- Do not create constraints in this stage\n"
-        ),
+        system_prompt=prompt.template,
         response_format=ContextRecommendation,
     )
+    user_message = "Analyze the dataset and identify the best optimization use case."
 
-    tool_trace: list[str] = []
-    debug_trace: dict[str, Any] = {}
-    args = invoke_structured_agent(
-        agent=agent,
-        user_input="Analyze the dataset and identify the best optimization use case.",
-        response_tool_name="ContextRecommendation",
-        retry_message=(
-            "You failed to output with ContextRecommendation. Return only a valid "
-            "ContextRecommendation tool call with all required fields."
-        ),
-        response_model=ContextRecommendation,
-        tool_trace=tool_trace,
-        debug_trace=debug_trace,
+    response = invoke_agent_with_prompt_trace(
+        agent,
+        stage="use_case",
+        prompt=prompt,
+        user_message=user_message,
     )
-    result = ContextRecommendation.model_validate(args).model_dump()
+
+    structured = response.get("structured_response")
+    if structured is None:
+        # Fallback: attempt to parse the last AI message text as JSON.
+        last_content = _last_ai_content(response.get("messages", []))
+        if last_content:
+            try:
+                structured = ContextRecommendation.model_validate_json(last_content)
+            except Exception:
+                pass
+    if structured is None:
+        raise ValueError("context_agent did not produce a structured_response.")
+
+
+    recommendation = _coerce_recommendation(structured)
+    result = recommendation.model_dump()
+
     if return_debug:
-        return {"result": result, "tool_trace": tool_trace, "debug": debug_trace}
+        tool_trace = extract_tool_trace(response.get("messages", []))
+        return {"result": result, "tool_trace": tool_trace, "debug": {"prompt": prompt_debug_payload(prompt)}}
     return result
 
 
