@@ -5,13 +5,19 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from io import StringIO
+import importlib
 import sys
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orchestrator.pipeline import run_pipeline
-from schemas.basemodels import PipelineState, ModellingRecommendation
+# Reload changed modules when Streamlit runs in a long-lived process.
+# This avoids stale imports for schema or orchestrator code during development.
+for module_name in ["schemas.basemodels", "orchestrator.pipeline", "agents.context_agent"]:
+    if module_name in sys.modules:
+        importlib.reload(sys.modules[module_name])
+
+from orchestrator.pipeline import stream_pipeline, run_downstream_agents, rerun_modeling_with_feedback
 
 # Configure Streamlit
 st.set_page_config(page_title="TexPrompter - Workflow Optimizer", layout="wide")
@@ -95,161 +101,6 @@ def extract_stage_from_traces(traces: list) -> str:
     return last_trace
 
 
-def rerun_modeling_with_feedback(csv_path: str, feedback: str, use_case_dict: dict, current_modeling_dict: dict, input_schema_payload: dict) -> tuple[dict, dict, dict]:
-    """
-    Rerun the modeling agent with user feedback AND rerun downstream agents.
-    
-    Args:
-        csv_path: Path to the CSV file
-        feedback: User feedback about the constraints
-        use_case_dict: The use case output from previous agent
-        current_modeling_dict: The current modeling output to improve upon
-        input_schema_payload: The CSV schema payload from initialize stage
-    
-    Returns:
-        Tuple of (modeling_output, preprocessing_output, scripting_output)
-    """
-    try:
-        from agents.Mathematical_modelling import run_mathematical_modelling_agent
-        from agents.Data_Processor_Agent import run_data_processor_agent
-        from agents.Pulp_Coding_Agent import run_pulp_coding_agent
-        
-        add_log("🔄 Step 1: Regenerating mathematical model with feedback...")
-        
-        # Step 1: Rerun the modeling agent with the use case + feedback
-        enhanced_use_case = use_case_dict.copy() if isinstance(use_case_dict, dict) else use_case_dict
-        if isinstance(enhanced_use_case, dict):
-            # Add feedback to assumptions/notes
-            if "assumptions" not in enhanced_use_case:
-                enhanced_use_case["assumptions"] = []
-            enhanced_use_case["assumptions"].append(f"User feedback: {feedback}")
-        
-        # Rerun the modeling agent
-        modeling_result = run_mathematical_modelling_agent(
-            csv_file_path=csv_path,
-            use_case=enhanced_use_case,
-            preview_rows=5,
-            return_debug=False
-        )
-        
-        # Extract the modeling recommendation
-        if isinstance(modeling_result, dict):
-            modeling_output = modeling_result.get("result") if "result" in modeling_result else modeling_result
-        else:
-            modeling_output = modeling_result
-        
-        add_log("✓ Mathematical model regenerated")
-        
-        # Step 2: Rerun the preprocessing agent with updated modeling
-        add_log("🔄 Step 2: Regenerating data preprocessing with updated model...")
-        
-        preprocessing_result = run_data_processor_agent(
-            csv_file_path=csv_path,
-            use_case=enhanced_use_case,
-            modelling=modeling_output,
-            input_schema_payload=input_schema_payload,
-            preview_rows=5,
-            return_debug=False
-        )
-        
-        if isinstance(preprocessing_result, dict):
-            preprocessing_output = preprocessing_result.get("result") if "result" in preprocessing_result else preprocessing_result
-        else:
-            preprocessing_output = preprocessing_result
-        
-        add_log("✓ Data preprocessing regenerated")
-        
-        # Step 3: Rerun the scripting agent with updated preprocessing
-        add_log("🔄 Step 3: Regenerating solver code with updated model...")
-        
-        scripting_result = run_pulp_coding_agent(
-            csv_file_path=csv_path,
-            modelling=modeling_output,
-            preprocessing=preprocessing_output,
-            preview_rows=5,
-            input_schema_payload=input_schema_payload,
-            return_debug=False
-        )
-        
-        if isinstance(scripting_result, dict):
-            scripting_output = scripting_result.get("result") if "result" in scripting_result else scripting_result
-        else:
-            scripting_output = scripting_result
-        
-        add_log("✓ Solver code regenerated")
-        add_log("✅ All downstream agents updated with feedback")
-        
-        return modeling_output, preprocessing_output, scripting_output
-    
-    except Exception as e:
-        add_log(f"❌ Error in feedback pipeline: {str(e)}", level="error")
-        raise
-
-
-def run_downstream_agents(csv_path: str, use_case_dict: dict, modeling_dict: dict, input_schema_payload: dict) -> tuple[dict, dict]:
-    """
-    Run only the preprocessing and scripting agents (used when user approves without feedback).
-    
-    Args:
-        csv_path: Path to the CSV file
-        use_case_dict: The use case output
-        modeling_dict: The modeling output
-        input_schema_payload: The CSV schema payload from initialize stage
-    
-    Returns:
-        Tuple of (preprocessing_output, scripting_output)
-    """
-    try:
-        from agents.Data_Processor_Agent import run_data_processor_agent
-        from agents.Pulp_Coding_Agent import run_pulp_coding_agent
-        
-        add_log("🔄 Running data preprocessing agent...")
-        
-        preprocessing_result = run_data_processor_agent(
-            csv_file_path=csv_path,
-            use_case=use_case_dict,
-            modelling=modeling_dict,
-            input_schema_payload=input_schema_payload,
-            preview_rows=5,
-            return_debug=False
-        )
-        
-        if isinstance(preprocessing_result, dict):
-            preprocessing_output = preprocessing_result.get("result") if "result" in preprocessing_result else preprocessing_result
-        else:
-            preprocessing_output = preprocessing_result
-        
-        add_log("✓ Data preprocessing completed")
-        
-        add_log("🔄 Running solver code generation agent...")
-        
-        scripting_result = run_pulp_coding_agent(
-            csv_file_path=csv_path,
-            modelling=modeling_dict,
-            preprocessing=preprocessing_output,
-            preview_rows=5,
-            input_schema_payload=input_schema_payload,
-            return_debug=False
-        )
-        
-        if isinstance(scripting_result, dict):
-            scripting_output = scripting_result.get("result") if "result" in scripting_result else scripting_result
-        else:
-            scripting_output = scripting_result
-        
-        add_log("✓ Solver code generation completed")
-        add_log("✅ All downstream agents completed")
-        
-        return preprocessing_output, scripting_output
-    
-    except Exception as e:
-        add_log(f"❌ Error in downstream pipeline: {str(e)}", level="error")
-        raise
-
-
-# ============================================================================
-# Utility Functions (continued)
-# ============================================================================
 
 def format_modeling_output(modeling_dict: dict) -> str:
     """Format modeling output for display."""
@@ -276,36 +127,6 @@ def format_modeling_output(modeling_dict: dict) -> str:
         output.append(modeling_dict["readable_documentation"])
     
     return "\n".join(output)
-
-
-# ============================================================================
-# Pipeline Streaming Generator
-# ============================================================================
-
-def _run_pipeline_with_streaming_generator(csv_path: str, initial_prompt: str = ""):
-    """
-    Generator that yields state updates from the pipeline.
-    Wraps the pipeline's streaming functionality.
-    """
-    try:
-        from langgraph.graph import StateGraph
-        from orchestrator.pipeline import build_pipeline_graph
-        from schemas.basemodels import PipelineState
-        
-        graph = build_pipeline_graph()
-        initial_state = PipelineState(
-            csv_file_path=csv_path,
-            preview_rows=5,
-        )
-        
-        # Stream pipeline execution
-        for state_update in graph.stream(initial_state.model_dump(), stream_mode="values"):
-            if isinstance(state_update, dict):
-                yield state_update
-    
-    except Exception as e:
-        st.error(f"Failed to run pipeline: {str(e)}")
-        raise
 
 
 # ============================================================================
@@ -404,7 +225,11 @@ else:
             
             # Stream pipeline execution
             with st.status("Executing pipeline...", expanded=True) as status:
-                for state_update in _run_pipeline_with_streaming_generator(csv_path, st.session_state.initial_prompt):
+                for state_update in stream_pipeline(
+                    csv_file_path=csv_path,
+                    preview_rows=5,
+                    initial_prompt=st.session_state.initial_prompt,
+                ):
                     if isinstance(state_update, dict):
                         st.session_state.pipeline_state = state_update
                         
@@ -588,9 +413,9 @@ else:
                             # Run the downstream agents without feedback
                             with st.spinner("⏳ Running preprocessing and solver agents..."):
                                 preprocessing_output, scripting_output = run_downstream_agents(
-                                    csv_path=st.session_state.csv_path,
-                                    use_case_dict=st.session_state.pipeline_state.get("use_case", {}),
-                                    modeling_dict=st.session_state.original_modeling or st.session_state.pipeline_state.get("modelling", {}),
+                                    csv_file_path=st.session_state.csv_path,
+                                    use_case=st.session_state.pipeline_state.get("use_case", {}),
+                                    modelling=st.session_state.original_modeling or st.session_state.pipeline_state.get("modelling", {}),
                                     input_schema_payload=st.session_state.pipeline_state.get("input_schema_payload", {})
                                 )
                                 
@@ -642,10 +467,10 @@ else:
                                     # Rerun all downstream agents with feedback
                                     with st.spinner("⏳ Processing feedback and regenerating all models..."):
                                         updated_modeling, updated_preprocessing, updated_scripting = rerun_modeling_with_feedback(
-                                            csv_path=st.session_state.csv_path,
+                                            csv_file_path=st.session_state.csv_path,
                                             feedback=feedback_text,
-                                            use_case_dict=st.session_state.pipeline_state.get("use_case", {}),
-                                            current_modeling_dict=modeling_dict,
+                                            use_case=st.session_state.pipeline_state.get("use_case", {}),
+                                            current_modelling=modeling_dict,
                                             input_schema_payload=st.session_state.pipeline_state.get("input_schema_payload", {})
                                         )
                                         

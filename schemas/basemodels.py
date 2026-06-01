@@ -362,3 +362,4 @@ class PipelineState(BaseModel):
     skip_stages: list[str] = Field(default_factory=list)
     retry_config: dict[str, int] = Field(default_factory=dict)
     llm_config: dict[str, str] = Field(default_factory=dict)
+    initial_prompt: str = ""

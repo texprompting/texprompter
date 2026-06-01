@@ -519,6 +519,40 @@ Pipeline streams → Stops at modeling
 
 ---
 
+### 10. Centralized Pipeline Execution for Streamlit
+**Request:** "Move pipeline execution logic out of Streamlit and keep it in the orchestrator module"
+
+**What was needed:**
+- Streamlit UI should only manage user interaction, display, and session state
+- All pipeline execution, streaming, downstream reruns, and feedback-driven reruns should run through `orchestrator/pipeline.py`
+- New helpers must use the same MLflow / LangGraph execution architecture as `run_pipeline`
+
+**How it was implemented:**
+
+#### Orchestrator pipeline helpers
+- **File:** `orchestrator/pipeline.py`
+- Added `stream_pipeline()` to stream LangGraph state updates inside an MLflow run
+- Added `run_downstream_agents()` to execute preprocessing + scripting after user approval
+- Added `rerun_modeling_with_feedback()` to rerun modeling with user feedback, then regenerate preprocessing and scripting
+- These helpers use `_setup_mlflow()` and nested MLflow runs when needed, matching `run_pipeline()` behavior
+
+#### Streamlit frontend cleanup
+- **File:** `app/streamlit_app.py`
+- Removed direct `StateGraph` pipeline construction from Streamlit
+- Removed agent-level pipeline orchestration from the UI file
+- Streamlit now imports and delegates execution to the orchestrator helpers
+
+#### Package visibility
+- **File:** `orchestrator/__init__.py`
+- Exported the new orchestrator helper names so package imports remain consistent
+
+**Impact:**
+- Pipeline logic is centralized in `orchestrator/pipeline.py`
+- Streamlit remains a UI-only integration layer
+- MLflow/LangGraph tracing is consistent across normal CLI runs and Streamlit-driven workflow runs
+
+---
+
 ## Architecture Summary
 
 ### Data Flow

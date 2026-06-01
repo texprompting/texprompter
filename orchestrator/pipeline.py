@@ -7,12 +7,20 @@ import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Iterator, TypedDict
 
-import mlflow
-from langgraph.graph import END, START, StateGraph
+try:
+    import mlflow
+except ModuleNotFoundError:
+    mlflow = None
 
-from agents.shared import classify_exception, load_csv_input_schema
+try:
+    from langgraph.graph import END, START, StateGraph
+except ModuleNotFoundError:
+    END = None
+    START = None
+    StateGraph = None
+
 from schemas.basemodels import (
     AgentError,
     AgentExecutionMetadata,
@@ -42,6 +50,7 @@ class PipelineStateDict(TypedDict, total=False):
     errors: list[dict[str, Any]]
     traces: list[str]
     llm_artifacts: dict[str, Any]
+    initial_prompt: str
     execution_metadata: list[dict[str, Any]]
     skip_stages: list[str]
     retry_config: dict[str, int]
@@ -56,7 +65,7 @@ def _emit_progress(message: str) -> None:
 def _log_traceback_to_mlflow(agent_name: str) -> None:
     """Persist the active exception traceback as an artifact on the current MLflow run."""
     try:
-        if mlflow.active_run() is None:
+        if mlflow is None or mlflow.active_run() is None:
             return
         mlflow.log_text(traceback.format_exc(), f"exceptions/{agent_name}.txt")
     except Exception:
@@ -99,6 +108,11 @@ def _setup_mlflow() -> None:
     single tracing layer is sufficient for our goals and stable in practice.
     """
     global _MLFLOW_BOOTSTRAPPED
+    if mlflow is None:
+        raise ImportError(
+            "mlflow is required to run orchestrator.pipeline. "
+            "Install mlflow in the active Python environment."
+        )
     if _MLFLOW_BOOTSTRAPPED:
         return
 
@@ -121,6 +135,43 @@ def _setup_mlflow() -> None:
         print(f"[pipeline] mlflow.langchain.autolog disabled: {exc}", flush=True)
 
     _MLFLOW_BOOTSTRAPPED = True
+
+
+def _load_input_schema_payload(csv_file_path: str, preview_rows: int) -> dict[str, Any]:
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+    from agents.shared import load_csv_input_schema
+
+    return load_csv_input_schema(
+        csv_file_path=str(resolved_csv_path),
+        preview_rows=preview_rows,
+    )
+
+
+def _normalize_use_case(use_case: Any | None) -> UseCaseRecommendation | None:
+    if use_case is None:
+        return None
+    if isinstance(use_case, UseCaseRecommendation):
+        return use_case
+    return UseCaseRecommendation.model_validate(use_case)
+
+
+def _normalize_modelling(modelling: Any | None) -> ModellingRecommendation | None:
+    if modelling is None:
+        return None
+    if isinstance(modelling, ModellingRecommendation):
+        return modelling
+    return ModellingRecommendation.model_validate(modelling)
+
+
+def _validate_and_extend_use_case_feedback(use_case: Any | None, feedback: str) -> UseCaseRecommendation | None:
+    validated = _normalize_use_case(use_case)
+    if validated is None:
+        return None
+    assumptions = list(validated.assumptions or [])
+    assumptions.append(f"User feedback: {feedback}")
+    return validated.model_copy(update={"assumptions": assumptions})
 
 
 def _record_execution_metadata(
@@ -157,7 +208,7 @@ def _record_execution_metadata(
 
     # Emit per-agent MLflow metrics so execution data is queryable in the UI.
     try:
-        if mlflow.active_run() is None:
+        if mlflow is None or mlflow.active_run() is None:
             return
         mlflow.log_metric(f"{agent_name}.duration_seconds", duration)
         if steps_used is not None:
@@ -271,7 +322,7 @@ def _record_prompt_lineage(
     state.llm_artifacts = artifacts
 
     try:
-        if mlflow.active_run() is None:
+        if mlflow is None or mlflow.active_run() is None:
             return
         tags: dict[str, str] = {
             f"prompt.{stage_name}.{key}": value
@@ -293,6 +344,7 @@ def _record_prompt_lineage(
 def run_use_case_agent(
     csv_file_path: str,
     preview_rows: int = 5,
+    initial_prompt: str = "",
     return_debug: bool = False,
 ) -> UseCaseRecommendation | dict[str, Any]:
     resolved_csv_path = _resolve_csv_path(csv_file_path)
@@ -304,6 +356,7 @@ def run_use_case_agent(
     raw_output = run_context_agent(
         csv_file_path=str(resolved_csv_path),
         preview_rows=preview_rows,
+        initial_prompt=initial_prompt,
         return_debug=return_debug,
     )
     raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_output)
@@ -468,6 +521,8 @@ def _ensure_input_schema_payload(state: PipelineState) -> None:
         raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
 
     state.csv_file_path = str(resolved_csv_path)
+    from agents.shared import load_csv_input_schema
+
     state.input_schema_payload = load_csv_input_schema(
         csv_file_path=str(resolved_csv_path),
         preview_rows=state.preview_rows,
@@ -535,6 +590,8 @@ def _set_error(
     steps_used: int | None = None,
     context_chars: int | None = None,
 ) -> None:
+    from agents.shared import classify_exception
+
     reason = stall_reason if stall_reason is not None else classify_exception(error)
     errors = list(state.errors)
     errors.append(
@@ -552,7 +609,7 @@ def _set_error(
 
     # Emit stall classification to MLflow so failure distributions are queryable.
     try:
-        if mlflow.active_run() is None:
+        if mlflow is None or mlflow.active_run() is None:
             return
         mlflow.log_metric(f"stall.{agent_name}.{reason.value}", 1.0)
         mlflow.set_tag(f"stall.{agent_name}.reason", reason.value)
@@ -579,6 +636,7 @@ def use_case_node(state: PipelineStateDict) -> PipelineStateDict:
             run_use_case_agent,
             csv_file_path=current_state.csv_file_path,
             preview_rows=current_state.preview_rows,
+            initial_prompt=current_state.initial_prompt,
         )
         current_state.use_case = UseCaseRecommendation.model_validate(payload)
         _record_prompt_lineage(current_state, stage_name="use_case", debug_payload=debug_payload)
@@ -815,6 +873,11 @@ def _run_pipeline_with_streaming(graph: Any, initial_state: PipelineState) -> Pi
 
 
 def build_pipeline_graph() -> Any:
+    if StateGraph is None or START is None or END is None:
+        raise ImportError(
+            "langgraph is required to build the orchestrator pipeline graph. "
+            "Install langgraph in the active Python environment."
+        )
     builder = StateGraph(PipelineStateDict)
 
     builder.add_node("initialize", initialize_node)
@@ -880,6 +943,7 @@ def run_agent_node(agent_name: str, state: PipelineStateDict) -> PipelineState:
 def run_pipeline(
     csv_file_path: str = "optimization_pipeline_test_easy.csv",
     preview_rows: int = 5,
+    initial_prompt: str = "",
     stream_pipeline_output: bool = False,
 ) -> PipelineState:
     global _STREAM_AGENT_OUTPUT, _STREAM_PIPELINE_PROGRESS
@@ -889,6 +953,7 @@ def run_pipeline(
     initial_state = PipelineState(
         csv_file_path=csv_file_path,
         preview_rows=preview_rows,
+        initial_prompt=initial_prompt,
     )
 
     previous_stream_agent_output = _STREAM_AGENT_OUTPUT
@@ -948,6 +1013,223 @@ def run_pipeline(
                 os.environ["OLLAMA_STREAM_STDOUT"] = prev_llm_stream_env
         _STREAM_AGENT_OUTPUT = previous_stream_agent_output
         _STREAM_PIPELINE_PROGRESS = previous_stream_pipeline_progress
+
+
+def stream_pipeline(
+    csv_file_path: str = "optimization_pipeline_test_easy.csv",
+    preview_rows: int = 5,
+    initial_prompt: str = "",
+) -> Iterator[dict[str, Any]]:
+    """Stream pipeline state updates while tracing execution with MLflow."""
+    global _STREAM_AGENT_OUTPUT, _STREAM_PIPELINE_PROGRESS
+
+    _setup_mlflow()
+    graph = build_pipeline_graph()
+    initial_state = PipelineState(
+        csv_file_path=csv_file_path,
+        preview_rows=preview_rows,
+        initial_prompt=initial_prompt,
+    )
+
+    previous_stream_agent_output = _STREAM_AGENT_OUTPUT
+    previous_stream_pipeline_progress = _STREAM_PIPELINE_PROGRESS
+    _STREAM_AGENT_OUTPUT = True
+    _STREAM_PIPELINE_PROGRESS = True
+    prev_llm_stream_env = os.environ.get("OLLAMA_STREAM_STDOUT")
+    os.environ["OLLAMA_STREAM_STDOUT"] = "1"
+
+    run_name = f"pipeline_stream_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    mlflow_run_started = False
+    mlflow_status = "FAILED"
+    try:
+        active_parent_run = mlflow.active_run()
+        start_run_kwargs: dict[str, Any] = {"run_name": run_name}
+        if active_parent_run is not None:
+            start_run_kwargs["nested"] = True
+        mlflow.start_run(**start_run_kwargs)
+        mlflow_run_started = True
+        mlflow.set_tags(
+            {
+                "component": "orchestrator.pipeline",
+                "pipeline.csv_file_path": csv_file_path,
+                "pipeline.mode": "stream",
+            }
+        )
+        mlflow.log_params(
+            {
+                "csv_file_path": csv_file_path,
+                "preview_rows": preview_rows,
+                "ollama_request_timeout_s": os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600"),
+                "ollama_max_tokens": os.getenv("OLLAMA_MAX_TOKENS", "unset"),
+                "agent_recursion_limit": os.getenv("AGENT_RECURSION_LIMIT", "12"),
+                "scripting_max_context_chars": os.getenv("SCRIPTING_MAX_CONTEXT_CHARS", "24000"),
+            }
+        )
+
+        try:
+            for state_update in graph.stream(initial_state.model_dump(), stream_mode="values"):
+                if not isinstance(state_update, Mapping):
+                    continue
+                yield dict(state_update)
+            mlflow_status = "FINISHED"
+        finally:
+            if mlflow_run_started:
+                mlflow.end_run(status=mlflow_status)
+    finally:
+        if prev_llm_stream_env is None:
+            os.environ.pop("OLLAMA_STREAM_STDOUT", None)
+        else:
+            os.environ["OLLAMA_STREAM_STDOUT"] = prev_llm_stream_env
+        _STREAM_AGENT_OUTPUT = previous_stream_agent_output
+        _STREAM_PIPELINE_PROGRESS = previous_stream_pipeline_progress
+
+
+def run_downstream_agents(
+    csv_file_path: str,
+    use_case: Any | None,
+    modelling: Any | None,
+    input_schema_payload: dict[str, Any] | None,
+    preview_rows: int = 5,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run preprocessing and scripting agents from an existing pipeline state."""
+    _setup_mlflow()
+    resolved_use_case = _normalize_use_case(use_case)
+    resolved_modelling = _normalize_modelling(modelling)
+    resolved_input_schema_payload = (
+        input_schema_payload
+        if input_schema_payload
+        else _load_input_schema_payload(csv_file_path, preview_rows)
+    )
+
+    run_name = f"pipeline_downstream_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    mlflow_run_started = False
+    mlflow_status = "FAILED"
+    try:
+        active_parent_run = mlflow.active_run()
+        start_run_kwargs: dict[str, Any] = {"run_name": run_name}
+        if active_parent_run is not None:
+            start_run_kwargs["nested"] = True
+        mlflow.start_run(**start_run_kwargs)
+        mlflow_run_started = True
+
+        mlflow.set_tags(
+            {
+                "component": "orchestrator.pipeline",
+                "pipeline.csv_file_path": csv_file_path,
+                "pipeline.mode": "downstream",
+            }
+        )
+        mlflow.log_params(
+            {
+                "csv_file_path": csv_file_path,
+                "preview_rows": preview_rows,
+                "ollama_request_timeout_s": os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600"),
+                "ollama_max_tokens": os.getenv("OLLAMA_MAX_TOKENS", "unset"),
+                "agent_recursion_limit": os.getenv("AGENT_RECURSION_LIMIT", "12"),
+                "scripting_max_context_chars": os.getenv("SCRIPTING_MAX_CONTEXT_CHARS", "24000"),
+            }
+        )
+
+        preprocessing_result = run_preprocessing_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            modelling=resolved_modelling,
+            input_schema_payload=resolved_input_schema_payload,
+            preview_rows=preview_rows,
+        )
+        scripting_result = run_scripting_agent(
+            csv_file_path=csv_file_path,
+            modelling=resolved_modelling,
+            preprocessing=preprocessing_result,
+            input_schema_payload=resolved_input_schema_payload,
+            preview_rows=preview_rows,
+        )
+
+        mlflow_status = "FINISHED"
+        return preprocessing_result.model_dump(), scripting_result.model_dump()
+    finally:
+        if mlflow_run_started:
+            mlflow.end_run(status=mlflow_status)
+
+
+def rerun_modeling_with_feedback(
+    csv_file_path: str,
+    feedback: str,
+    use_case: Any | None,
+    current_modelling: Any | None,
+    input_schema_payload: dict[str, Any] | None,
+    preview_rows: int = 5,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Rerun modeling and downstream agents based on user feedback."""
+    _setup_mlflow()
+    resolved_use_case = _validate_and_extend_use_case_feedback(use_case, feedback)
+    resolved_input_schema_payload = (
+        input_schema_payload
+        if input_schema_payload
+        else _load_input_schema_payload(csv_file_path, preview_rows)
+    )
+
+    run_name = f"pipeline_feedback_{datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    mlflow_run_started = False
+    mlflow_status = "FAILED"
+    try:
+        active_parent_run = mlflow.active_run()
+        start_run_kwargs: dict[str, Any] = {"run_name": run_name}
+        if active_parent_run is not None:
+            start_run_kwargs["nested"] = True
+        mlflow.start_run(**start_run_kwargs)
+        mlflow_run_started = True
+
+        mlflow.set_tags(
+            {
+                "component": "orchestrator.pipeline",
+                "pipeline.csv_file_path": csv_file_path,
+                "pipeline.mode": "feedback",
+            }
+        )
+        mlflow.log_params(
+            {
+                "csv_file_path": csv_file_path,
+                "preview_rows": preview_rows,
+                "ollama_request_timeout_s": os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600"),
+                "ollama_max_tokens": os.getenv("OLLAMA_MAX_TOKENS", "unset"),
+                "agent_recursion_limit": os.getenv("AGENT_RECURSION_LIMIT", "12"),
+                "scripting_max_context_chars": os.getenv("SCRIPTING_MAX_CONTEXT_CHARS", "24000"),
+            }
+        )
+
+        if _normalize_modelling(current_modelling) is None:
+            raise ValueError("Current modelling output is required for feedback rerun.")
+
+        modelling_result = run_modeling_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            preview_rows=preview_rows,
+        )
+        preprocessing_result = run_preprocessing_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            modelling=modelling_result,
+            input_schema_payload=resolved_input_schema_payload,
+            preview_rows=preview_rows,
+        )
+        scripting_result = run_scripting_agent(
+            csv_file_path=csv_file_path,
+            modelling=modelling_result,
+            preprocessing=preprocessing_result,
+            input_schema_payload=resolved_input_schema_payload,
+            preview_rows=preview_rows,
+        )
+
+        mlflow_status = "FINISHED"
+        return (
+            modelling_result.model_dump(),
+            preprocessing_result.model_dump(),
+            scripting_result.model_dump(),
+        )
+    finally:
+        if mlflow_run_started:
+            mlflow.end_run(status=mlflow_status)
 
 
 def _positive_int(value: str) -> int:
