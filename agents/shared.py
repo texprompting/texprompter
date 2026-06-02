@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -400,6 +401,34 @@ def get_data_dir() -> Path:
 
 def get_test_outputs_dir() -> Path:
     return get_project_root() / "TestOutputs"
+
+
+def execute_generated_pulp_model(
+    script_path: Path | None = None,
+    *,
+    timeout_s: float | None = None,
+) -> str:
+    """Execute the generated PuLP script in a sandboxed subprocess and return its output."""
+    target_path = (script_path or (get_test_outputs_dir() / "generated_pulp_model.py")).resolve()
+    if not target_path.exists():
+        raise FileNotFoundError(f"generated_pulp_model.py not found at {target_path}")
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(target_path)],
+        cwd=str(get_project_root()),
+        capture_output=True,
+        text=True,
+        errors="replace",
+        env=os.environ.copy(),
+        timeout=timeout_s,
+    )
+    output_parts = [part for part in (result.stdout, result.stderr) if part]
+    output = "".join(output_parts)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Sandboxed PuLP script failed with exit code {result.returncode}.\n{output}"
+        )
+    return output
 
 
 def load_csv_input_schema(csv_file_path: str, preview_rows: int) -> dict[str, Any]:
