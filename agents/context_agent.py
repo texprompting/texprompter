@@ -65,6 +65,7 @@ def _coerce_recommendation(value: Any) -> ContextRecommendation:
 def run_context_agent(
     csv_file_path: str | None = None,
     preview_rows: int = 10,
+    initial_prompt: str = "",
     return_debug: bool = False,
 ) -> dict[str, Any]:
     """Analyze CSV data and return the legacy context recommendation contract."""
@@ -99,6 +100,8 @@ def run_context_agent(
         response_format=ContextRecommendation,
     )
     user_message = "Analyze the dataset and identify the best optimization use case."
+    if initial_prompt and initial_prompt.strip():
+        user_message += f" Additional context: {initial_prompt.strip()}"
 
     response = invoke_agent_with_prompt_trace(
         agent,

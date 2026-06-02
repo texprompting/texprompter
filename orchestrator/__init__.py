@@ -9,7 +9,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-__all__ = ["build_pipeline_graph", "run_pipeline"]
+__all__ = ["build_pipeline_graph", "run_pipeline", "stream_pipeline", "run_downstream_agents", "rerun_modeling_with_feedback"]
 
 
 def __getattr__(name: str) -> Any:
