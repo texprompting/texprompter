@@ -130,7 +130,7 @@ def run_mathematical_modelling_agent(
 
     prompt = load_system_prompt_result("modeling")
     agent = create_agent(
-        model=build_chat_model(),
+        model=build_chat_model(thinking_budget=2048),
         tools=[get_use_case_recommendation, get_column_names, get_reference_model],
         system_prompt=prompt.template,
         response_format=ModellingRecommendation,

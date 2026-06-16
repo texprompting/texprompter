@@ -202,7 +202,7 @@ def run_data_processor_agent(
 
     prompt = load_system_prompt_result("preprocessing")
     agent = create_agent(
-        model=build_chat_model(),
+        model=build_chat_model(thinking_budget=1024),
         tools=[
             get_mathematical_model,
             get_input_schema_payload,

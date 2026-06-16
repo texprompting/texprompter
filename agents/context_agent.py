@@ -94,7 +94,7 @@ def run_context_agent(
 
     prompt = load_system_prompt_result("use_case")
     agent = create_agent(
-        model=build_chat_model(),
+        model=build_chat_model(thinking_budget=1024),
         tools=[get_column_names, get_csv_preview, get_basic_stats],
         system_prompt=prompt.template,
         response_format=ContextRecommendation,

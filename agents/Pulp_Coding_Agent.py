@@ -301,7 +301,7 @@ def run_pulp_coding_agent(
         add_milestone("prompt_loaded", prompt_chars=len(prompt.template))
 
         add_milestone("model_build_start")
-        model = build_chat_model()
+        model = build_chat_model(thinking_budget=2048)
         debug["model"] = {
             "model": getattr(model, "model_name", None) or getattr(model, "model", None),
             "timeout": getattr(model, "request_timeout", None),

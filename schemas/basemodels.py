@@ -288,6 +288,14 @@ class ScriptingRecommendation(BaseModel):
         default_factory=list,
         description="Extra diagnostics, warnings, or simplifications.",
     )
+    unit_tests_status: str | None = Field(
+        default=None,
+        description="Execution status of the unit tests in the sandbox.",
+    )
+    unit_tests_error: str | None = Field(
+        default=None,
+        description="Error message from failed unit tests.",
+    )
 
     @field_validator("successful_implementation", mode="before")
     @classmethod

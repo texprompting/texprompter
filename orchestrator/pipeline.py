@@ -789,16 +789,59 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
         current_state.scripting = ScriptingRecommendation.model_validate(payload)
         _record_prompt_lineage(current_state, stage_name="scripting", debug_payload=debug_payload)
         if current_state.scripting.successful_implementation:
-            _append_trace(current_state, "scripting:ok")
-            _record_execution_metadata(
-                current_state,
-                agent_name="scripting_agent",
-                started_at=started_at,
-                status="ok",
-                tool_calls=tool_trace,
-                notes=_debug_notes(debug_payload),
-            )
-            _emit_progress("scripting:ok")
+            from agents.shared import get_test_outputs_dir, execute_generated_pulp_model
+            output_dir = get_test_outputs_dir()
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / "generated_pulp_model.py"
+            output_path.write_text(current_state.scripting.code, encoding="utf-8")
+
+            sandbox_res = execute_generated_pulp_model(output_path)
+            test_status = sandbox_res["test_status"]
+            if test_status == "error":
+                error = RuntimeError(sandbox_res["test_error"])
+                _set_error(current_state, "scripting_agent", error)
+                _append_trace(current_state, "scripting:error")
+                _record_execution_metadata(
+                    current_state,
+                    agent_name="scripting_agent",
+                    started_at=started_at,
+                    status="error",
+                    tool_calls=tool_trace,
+                    notes=[sandbox_res["test_error"] or "", *_debug_notes(debug_payload)],
+                )
+                _emit_progress(f"scripting:error - {sandbox_res['test_error']}")
+            elif test_status == "failed":
+                current_state.scripting = current_state.scripting.model_copy(update={
+                    "unit_tests_status": "failed",
+                    "unit_tests_error": sandbox_res["test_error"],
+                    "additional_info": list(current_state.scripting.additional_info or []) + [sandbox_res["test_error"]],
+                })
+                _append_trace(current_state, "scripting:unit_tests_failed")
+                _append_trace(current_state, "scripting:ok")
+                _record_execution_metadata(
+                    current_state,
+                    agent_name="scripting_agent",
+                    started_at=started_at,
+                    status="ok",
+                    tool_calls=tool_trace,
+                    notes=_debug_notes(debug_payload),
+                )
+                _emit_progress("scripting:ok (unit tests failed)")
+            elif test_status == "succeeded":
+                current_state.scripting = current_state.scripting.model_copy(update={
+                    "unit_tests_status": "succeeded",
+                })
+                _append_trace(current_state, "scripting:unit_tests_passed")
+                _append_trace(current_state, "scripting:ok")
+                _record_execution_metadata(
+                    current_state,
+                    agent_name="scripting_agent",
+                    started_at=started_at,
+                    status="ok",
+                    tool_calls=tool_trace,
+                    notes=_debug_notes(debug_payload),
+                )
+                _emit_progress("scripting:ok")
         else:
             detail = "; ".join(current_state.scripting.additional_info).strip()
             if not detail:

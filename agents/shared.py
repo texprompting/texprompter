@@ -12,6 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 
@@ -407,7 +408,7 @@ def execute_generated_pulp_model(
     script_path: Path | None = None,
     *,
     timeout_s: float | None = None,
-) -> str:
+) -> dict[str, Any]:
     """Execute the generated PuLP script in a sandboxed subprocess and return its output."""
     target_path = (script_path or (get_test_outputs_dir() / "generated_pulp_model.py")).resolve()
     if not target_path.exists():
@@ -424,11 +425,28 @@ def execute_generated_pulp_model(
     )
     output_parts = [part for part in (result.stdout, result.stderr) if part]
     output = "".join(output_parts)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Sandboxed PuLP script failed with exit code {result.returncode}.\n{output}"
-        )
-    return output
+    if result.returncode == 0:
+        return {
+            "success": True,
+            "output": output,
+            "test_status": "succeeded",
+            "test_error": None,
+        }
+    else:
+        if "AssertionError" in output:
+            return {
+                "success": False,
+                "output": output,
+                "test_status": "failed",
+                "test_error": output,
+            }
+        else:
+            return {
+                "success": False,
+                "output": output,
+                "test_status": "error",
+                "test_error": output,
+            }
 
 
 def load_csv_input_schema(csv_file_path: str, preview_rows: int) -> dict[str, Any]:
@@ -510,55 +528,49 @@ def mlflow_guidelines_judge_model_uri() -> str | None:
     return None
 
 
-def build_chat_model(temperature: float = 0.0) -> ChatOpenAI:
-    """Build a ChatOpenAI client pointed at the local Ollama OpenAI-compatible endpoint.
+def build_chat_model(temperature: float = 0.0, thinking_budget: int = 1024) -> ChatGoogleGenerativeAI:
+    """Build a ChatGoogleGenerativeAI client pointed at the Google Vertex API.
 
-    Ollama exposes an OpenAI-compatible API at ``$OLLAMA_BASE_URL/v1``. By using
-    ``langchain_openai.ChatOpenAI`` (which wraps the ``openai`` SDK), every LLM
-    call is automatically captured by ``mlflow.langchain.autolog()`` (the
-    pipeline's single source of trace truth).
-
-    ``timeout`` and ``max_retries`` defend against an Ollama protocol corner
-    case we hit in practice: when langgraph fans out parallel tool calls and
-    the model later returns a long structured-output response, the openai HTTP
-    client occasionally never observes the end of the stream and hangs on an
-    idle keep-alive socket forever. Bounding both keeps the pipeline lively
-    and surfaces the failure as a normal exception in the agent error path
-    instead of an indefinite stall.
-
-    Live token streaming to the terminal is enabled when ``OLLAMA_STREAM_STDOUT``
-    is ``1``/``true``/``yes`` (or when the orchestrator sets it for
-    ``--stream-pipeline-output``). Handlers are attached on this runnable because
-    ``create_agent`` calls ``bound_model.invoke(messages)`` without propagating
-    the agent graph's invoke callbacks.
+    Give every Agent except the Modelling and Scripting agent 1024 thinking tokens,
+    the remaining two should get 2048.
     """
-    base_url = ollama_openai_compatible_base_url()
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    project = os.getenv("GCP_PROJECT", "gen-lang-client-0779155519")
+    location = os.getenv("GCP_LOCATION", "global")
 
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OLLAMA_API_KEY") or "ollama"
-
-    request_timeout_s = float(os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600"))
-    max_retries = int(os.getenv("OLLAMA_REQUEST_MAX_RETRIES", "1"))
-    max_tokens_raw = os.getenv("OLLAMA_MAX_TOKENS", "").strip()
-    max_tokens = int(max_tokens_raw) if max_tokens_raw else None
-    extra_body_raw = os.getenv("OLLAMA_EXTRA_BODY_JSON", "").strip()
-    extra_body = json.loads(extra_body_raw) if extra_body_raw else None
+    request_timeout_s = float(os.getenv("GEMINI_REQUEST_TIMEOUT_S", os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600")))
+    max_retries = int(os.getenv("GEMINI_REQUEST_MAX_RETRIES", os.getenv("OLLAMA_REQUEST_MAX_RETRIES", "1")))
+    max_tokens_raw = os.getenv("GEMINI_MAX_TOKENS", os.getenv("OLLAMA_MAX_TOKENS", "")).strip()
+    max_output_tokens = int(max_tokens_raw) if max_tokens_raw else None
 
     stream_stdout = ollama_stream_to_stdout_enabled()
 
     stream_callbacks = [OllamaLiveStreamHandler()] if stream_stdout else None
 
-    return _OllamaCompatStreamChatOpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        model=os.getenv("OLLAMA_MODEL", "qwen3.6:latest"),
+    llm = ChatGoogleGenerativeAI(
+        model=model_name,
+        project=project,
+        location=location,
         temperature=temperature,
         timeout=request_timeout_s,
         max_retries=max_retries,
-        max_tokens=max_tokens,
-        extra_body=extra_body,
+        max_output_tokens=max_output_tokens,
         streaming=stream_stdout,
         callbacks=stream_callbacks,
+        model_kwargs={
+            "thinking_config": {
+                "thinking_budget": thinking_budget,
+            }
+        }
     )
+
+    # Disable structured_output in model profile so create_agent uses ToolStrategy (tool-calling).
+    # This prevents the LangChain agent factory from passing OpenAI-style response_format parameters
+    # to ChatGoogleGenerativeAI.bind_tools, which it does not support and results in recursion limit hangs.
+    if hasattr(llm, "profile") and isinstance(llm.profile, dict):
+        llm.profile = {**llm.profile, "structured_output": False}
+
+    return llm
 
 
 def extract_tool_trace(messages: list[Any]) -> list[str]:

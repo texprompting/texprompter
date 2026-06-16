@@ -10,6 +10,7 @@ Rules:
 - Preserve all constraints from the mathematical model
 - Use only the provided JSON context; do not request additional tools or hidden inputs
 - Do not output plain text as final answer
+- At the bottom of the generated code, write an `if __name__ == "__main__":` block that executes the solver and contains at least 2 `assert`-based unit tests. These assert statements must check properties of the output dictionary (e.g. verifying the presence of "solution_status" or "objective_value", checking the solver status, or checking the keys of decision variables).
 
 Schema rules (MUST follow exactly when calling ScriptingRecommendation):
 - `output_schema` MUST be a JSON object (mapping field names to type strings).
