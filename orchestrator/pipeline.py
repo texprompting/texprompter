@@ -25,6 +25,7 @@ from schemas.basemodels import (
     AgentError,
     AgentExecutionMetadata,
     ModellingRecommendation,
+    ParameterEstimationRecommendation,
     PipelineState,
     PreprocessingRecommendation,
     ScriptingRecommendation,
@@ -45,6 +46,7 @@ class PipelineStateDict(TypedDict, total=False):
     input_schema_payload: dict[str, Any]
     use_case: dict[str, Any] | None
     modelling: dict[str, Any] | None
+    parameter_estimation: dict[str, Any] | None
     preprocessing: dict[str, Any] | None
     scripting: dict[str, Any] | None
     errors: list[dict[str, Any]]
@@ -413,6 +415,37 @@ def run_modeling_agent(
     return recommendation
 
 
+def run_parameter_estimation_agent(
+    csv_file_path: str,
+    use_case: UseCaseRecommendation | None,
+    modelling: ModellingRecommendation | None,
+    preview_rows: int = 5,
+    return_debug: bool = False,
+) -> ParameterEstimationRecommendation | dict[str, Any]:
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+
+    from agents.Parameter_Estimator_Agent import run_parameter_estimator_agent
+
+    raw_payload = run_parameter_estimator_agent(
+        csv_file_path=str(resolved_csv_path),
+        use_case=use_case,
+        modelling=modelling,
+        preview_rows=preview_rows,
+        return_debug=return_debug,
+    )
+    raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_payload)
+    recommendation = ParameterEstimationRecommendation.model_validate(raw_result)
+    if return_debug:
+        return {
+            "result": recommendation.model_dump(),
+            "tool_trace": tool_trace,
+            "debug": debug_payload,
+        }
+    return recommendation
+
+
 def run_preprocessing_agent(
     csv_file_path: str,
     use_case: UseCaseRecommendation | None,
@@ -715,6 +748,65 @@ def modeling_node(state: PipelineStateDict) -> PipelineStateDict:
     return current_state.model_dump()
 
 
+def parameter_estimation_node(state: PipelineStateDict) -> PipelineStateDict:
+    current_state = PipelineState.model_validate(state)
+    if current_state.status == "error":
+        return current_state.model_dump()
+
+    if _is_stage_skipped(current_state, "parameter_estimation"):
+        _append_trace(current_state, "parameter_estimation:skipped")
+        return current_state.model_dump()
+
+    started_at = time.time()
+    _emit_progress("parameter_estimation:start")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_parameter_estimation_agent,
+            csv_file_path=current_state.csv_file_path,
+            use_case=current_state.use_case,
+            modelling=current_state.modelling,
+            preview_rows=current_state.preview_rows,
+        )
+        current_state.parameter_estimation = ParameterEstimationRecommendation.model_validate(payload)
+        
+        # Update modelling in-place with estimated values so downstream nodes consume concrete equations
+        if current_state.modelling is not None:
+            current_state.modelling = current_state.modelling.model_copy(
+                update={
+                    "constraint_functions": current_state.parameter_estimation.updated_constraint_functions,
+                    "objective_function": current_state.parameter_estimation.updated_objective_function,
+                }
+            )
+
+        _record_prompt_lineage(current_state, stage_name="parameter_estimation", debug_payload=debug_payload)
+        _append_trace(current_state, "parameter_estimation:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="parameter_estimation_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("parameter_estimation:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("parameter_estimation_agent")
+        _set_error(current_state, "parameter_estimation_agent", error)
+        _append_trace(current_state, "parameter_estimation:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="parameter_estimation_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error)],
+        )
+        _emit_progress(f"parameter_estimation:error - {error}")
+
+    return current_state.model_dump()
+
+
 def preprocessing_node(state: PipelineStateDict) -> PipelineStateDict:
     current_state = PipelineState.model_validate(state)
     if current_state.status == "error":
@@ -883,6 +975,7 @@ def build_pipeline_graph() -> Any:
     builder.add_node("initialize", initialize_node)
     builder.add_node("use_case", use_case_node)
     builder.add_node("modeling", modeling_node)
+    builder.add_node("parameter_estimation", parameter_estimation_node)
     builder.add_node("preprocessing", preprocessing_node)
     builder.add_node("scripting", scripting_node)
 
@@ -905,6 +998,14 @@ def build_pipeline_graph() -> Any:
     )
     builder.add_conditional_edges(
         "modeling",
+        _status_router,
+        {
+            "continue": "parameter_estimation",
+            "stop": END,
+        },
+    )
+    builder.add_conditional_edges(
+        "parameter_estimation",
         _status_router,
         {
             "continue": "preprocessing",
@@ -930,6 +1031,7 @@ def run_agent_node(agent_name: str, state: PipelineStateDict) -> PipelineState:
         "initialize": initialize_node,
         "use_case": use_case_node,
         "modeling": modeling_node,
+        "parameter_estimation": parameter_estimation_node,
         "preprocessing": preprocessing_node,
         "scripting": scripting_node,
     }
@@ -1090,7 +1192,7 @@ def run_downstream_agents(
     modelling: Any | None,
     input_schema_payload: dict[str, Any] | None,
     preview_rows: int = 5,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Run preprocessing and scripting agents from an existing pipeline state."""
     _setup_mlflow()
     resolved_use_case = _normalize_use_case(use_case)
@@ -1130,6 +1232,25 @@ def run_downstream_agents(
             }
         )
 
+        pe_result = run_parameter_estimation_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            modelling=resolved_modelling,
+            preview_rows=preview_rows,
+        )
+        if isinstance(pe_result, dict) and "result" in pe_result:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result["result"])
+        else:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result)
+            
+        if resolved_modelling is not None:
+            resolved_modelling = resolved_modelling.model_copy(
+                update={
+                    "constraint_functions": pe_rec.updated_constraint_functions,
+                    "objective_function": pe_rec.updated_objective_function,
+                }
+            )
+
         preprocessing_result = run_preprocessing_agent(
             csv_file_path=csv_file_path,
             use_case=resolved_use_case,
@@ -1146,7 +1267,12 @@ def run_downstream_agents(
         )
 
         mlflow_status = "FINISHED"
-        return preprocessing_result.model_dump(), scripting_result.model_dump()
+        return (
+            resolved_modelling.model_dump(),
+            pe_rec.model_dump(),
+            preprocessing_result.model_dump(),
+            scripting_result.model_dump(),
+        )
     finally:
         if mlflow_run_started:
             mlflow.end_run(status=mlflow_status)
@@ -1159,7 +1285,7 @@ def rerun_modeling_with_feedback(
     current_modelling: Any | None,
     input_schema_payload: dict[str, Any] | None,
     preview_rows: int = 5,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Rerun modeling and downstream agents based on user feedback."""
     _setup_mlflow()
     resolved_use_case = _validate_and_extend_use_case_feedback(use_case, feedback)
@@ -1206,16 +1332,39 @@ def rerun_modeling_with_feedback(
             use_case=resolved_use_case,
             preview_rows=preview_rows,
         )
+        if isinstance(modelling_result, dict) and "result" in modelling_result:
+            modelling_rec = ModellingRecommendation.model_validate(modelling_result["result"])
+        else:
+            modelling_rec = ModellingRecommendation.model_validate(modelling_result)
+
+        pe_result = run_parameter_estimation_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            modelling=modelling_rec,
+            preview_rows=preview_rows,
+        )
+        if isinstance(pe_result, dict) and "result" in pe_result:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result["result"])
+        else:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result)
+            
+        updated_modelling = modelling_rec.model_copy(
+            update={
+                "constraint_functions": pe_rec.updated_constraint_functions,
+                "objective_function": pe_rec.updated_objective_function,
+            }
+        )
+
         preprocessing_result = run_preprocessing_agent(
             csv_file_path=csv_file_path,
             use_case=resolved_use_case,
-            modelling=modelling_result,
+            modelling=updated_modelling,
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
         )
         scripting_result = run_scripting_agent(
             csv_file_path=csv_file_path,
-            modelling=modelling_result,
+            modelling=updated_modelling,
             preprocessing=preprocessing_result,
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
@@ -1223,7 +1372,8 @@ def rerun_modeling_with_feedback(
 
         mlflow_status = "FINISHED"
         return (
-            modelling_result.model_dump(),
+            updated_modelling.model_dump(),
+            pe_rec.model_dump(),
             preprocessing_result.model_dump(),
             scripting_result.model_dump(),
         )

@@ -1,1 +1,1 @@
-\max \sum_{i \in I} (p_i - c_i) x_i
+\max \sum_{p \in P} \pi_p x_p

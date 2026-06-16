@@ -101,32 +101,73 @@ def extract_stage_from_traces(traces: list) -> str:
     return last_trace
 
 
-
-def format_modeling_output(modeling_dict: dict) -> str:
-    """Format modeling output for display."""
+def display_modeling_output(modeling_dict: dict):
+    """Format modeling output for display using structured Pydantic fields."""
     if not modeling_dict:
-        return "No modeling output available"
+        st.write("No modeling output available")
+        return
+
+    # 1. Header & Problem Type
+    is_minimizing = modeling_dict.get("minimizing_problem", True)
+    problem_type = "Minimization" if is_minimizing else "Maximization"
+    st.header(f"MILP Model Documentation ({problem_type})")
     
-    output = []
+    # 2. Objective Function
+    st.subheader("Objective Function")
+    obj_fn = modeling_dict.get("objective_function", "")
+    if obj_fn:
+        # Streamlit handles LaTeX natively via st.latex
+        st.latex(obj_fn)
+    else:
+        st.write("No objective function defined.")
+
+    # 3. Variables & Parameters (Expandable Reference Sections)
+    col1, col2 = st.columns(2)
     
-    # Objective Function
-    if "objective_function" in modeling_dict:
-        output.append("## Objective Function")
-        output.append(f"$$\n{modeling_dict['objective_function']}\n$$")
-    
-    # Constraints
-    if "constraint_functions" in modeling_dict and modeling_dict["constraint_functions"]:
-        output.append("\n## Constraints")
-        for i, constraint in enumerate(modeling_dict["constraint_functions"], 1):
-            output.append(f"\n**Constraint {i}:**")
-            output.append(f"$$\n{constraint}\n$$")
-    
-    # Documentation
-    if "readable_documentation" in modeling_dict:
-        output.append("\n## Documentation")
-        output.append(modeling_dict["readable_documentation"])
-    
-    return "\n".join(output)
+    with col1:
+        with st.expander("Decision Variables", expanded=False):
+            variables = modeling_dict.get("variables", [])
+            if variables:
+                for var in variables:
+                    # Assumes Pydantic model / dict has 'name' and 'description' attributes
+                    name = var.get("name") if isinstance(var, dict) else getattr(var, "name", "")
+                    desc = var.get("description") if isinstance(var, dict) else getattr(var, "description", "")
+                    st.latex(f"**{name}**: {desc}")
+            else:
+                st.write("No variables defined.")
+
+    with col2:
+        with st.expander("Parameters & Coefficients", expanded=False):
+            parameters = modeling_dict.get("parameters", [])
+            if parameters:
+                for param in parameters:
+                    # Assumes Pydantic model / dict has 'symbol' and 'description' attributes
+                    symbol = param.get("symbol") if isinstance(param, dict) else getattr(param, "symbol", "")
+                    desc = param.get("description") if isinstance(param, dict) else getattr(param, "description", "")
+                    st.markdown(f"**{symbol}**: {desc}")
+            else:
+                st.write("No parameters defined.")
+
+    # 4. Constraints Section
+    st.subheader("Constraints")
+    constraints = modeling_dict.get("constraint_functions", [])
+    if constraints:
+        for constraint in constraints:
+            st.latex(constraint)
+    else:
+        st.write("No constraints defined.")
+
+    # 5. Natural Language Explanation
+    explanations = modeling_dict.get("explanation_of_ILP", [])
+    if explanations:
+        st.subheader("Model Explanation")
+        for exp in explanations:
+            st.markdown(f"* {exp}")
+
+    # 6. Required Data Columns (Optional UI reference)
+    cols_used = modeling_dict.get("col_names_used", [])
+    if cols_used:
+        st.caption(f"**Required CSV Columns:** {', '.join(cols_used)}")
 
 
 # ============================================================================
@@ -154,7 +195,7 @@ with st.sidebar:
     
     # Start button
     if st.session_state.csv_file and not st.session_state.execution_running:
-        if st.button("🚀 Start Analysis", use_container_width=True):
+        if st.button("🚀 Start Analysis", width="stretch"):
             st.session_state.execution_running = True
             st.session_state.execution_complete = False
             st.session_state.pipeline_state = None
@@ -171,7 +212,7 @@ with st.sidebar:
     
     # Retry button (shown on error)
     if st.session_state.last_error and not st.session_state.execution_running:
-        if st.button("🔄 Retry from Failed Stage", use_container_width=True):
+        if st.button("🔄 Retry from Failed Stage", width="stretch"):
             st.session_state.execution_running = True
             st.session_state.last_error = None
             st.session_state.show_modeling_intercept = False
@@ -186,7 +227,7 @@ else:
     with st.expander("📊 CSV Preview", expanded=False):
         try:
             df = pd.read_csv(StringIO(st.session_state.csv_file.decode()))
-            st.dataframe(df.head(10), use_container_width=True)
+            st.dataframe(df.head(10), width="stretch")
             st.caption(f"Shape: {df.shape[0]} rows × {df.shape[1]} columns")
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
@@ -201,32 +242,34 @@ else:
     # Pipeline Execution
     # ========================================================================
     
-    if st.session_state.execution_running and st.session_state.pipeline_state is None:
-        # Run pipeline with streaming
+    # ========================================================================
+    # Pipeline Execution
+    # ========================================================================
+    
+    # FIX 1: Allow the block to process if execution is running, regardless of partial state
+    if st.session_state.execution_running:
         try:
-            # Save CSV temporarily
-            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.csv') as tmp:
-                tmp.write(st.session_state.csv_file)
-                csv_path = tmp.name
-                st.session_state.csv_path = csv_path
+            # Save CSV temporarily if it hasn't been saved yet
+            if not st.session_state.csv_path:
+                with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.csv') as tmp:
+                    tmp.write(st.session_state.csv_file)
+                    st.session_state.csv_path = tmp.name
             
             st.divider()
             st.header("📈 Real-Time Execution Progress")
             
-            # Create placeholder for logs (inside persistent container, created once before loop)
+            # Create placeholder for logs inside persistent container
             with log_container:
                 with st.expander("📋 Execution Logs", expanded=True):
                     logs_placeholder = st.empty()
             
-            # Track which stages have been displayed
             displayed_stages = set()
             seen_traces = 0
-            modeling_completed = False
             
             # Stream pipeline execution
             with st.status("Executing pipeline...", expanded=True) as status:
                 for state_update in stream_pipeline(
-                    csv_file_path=csv_path,
+                    csv_file_path=st.session_state.csv_path,
                     preview_rows=5,
                     initial_prompt=st.session_state.initial_prompt,
                 ):
@@ -241,7 +284,7 @@ else:
                                 status.write(f"✓ {trace}")
                             seen_traces = len(traces)
                         
-                        # Update logs in placeholder (not in loop - create expander once)
+                        # Update logs in placeholder
                         with logs_placeholder.container():
                             for log_entry in st.session_state.agent_logs:
                                 if log_entry["level"] == "error":
@@ -259,56 +302,26 @@ else:
                             st.session_state.error_stage = error.get("agent_name", "unknown")
                             raise Exception(f"Error in {error.get('agent_name')}: {error.get('message')}")
                         
-                        # Display outputs in real-time as they appear
-                        with outputs_container:
-                            # Use Case output
-                            if "use_case" in state_update and "use_case" not in displayed_stages:
-                                if state_update.get("use_case"):
-                                    displayed_stages.add("use_case")
-                                    with st.expander("📌 Use Case Analysis", expanded=True):
-                                        use_case = state_update["use_case"]
-                                        col1, col2 = st.columns(2)
-                                        with col1:
-                                            st.subheader("Business Goal")
-                                            st.write(use_case.get("business_goal", "N/A"))
-                                        with col2:
-                                            st.subheader("Objective Direction")
-                                            st.write(use_case.get("objective_direction", "N/A"))
-                                        
-                                        if "decision_variables" in use_case:
-                                            st.subheader("Decision Variables")
-                                            for var in use_case.get("decision_variables", []):
-                                                st.write(f"• {var}")
-                                        
-                                        if "constraints_to_consider" in use_case:
-                                            st.subheader("Constraints to Consider")
-                                            for constraint in use_case.get("constraints_to_consider", []):
-                                                st.write(f"• {constraint}")
-                            
-                            # Modeling output - INTERRUPT PIPELINE HERE
-                            if "modelling" in state_update and "modelling" not in displayed_stages:
-                                if state_update.get("modelling"):
-                                    displayed_stages.add("modelling")
-                                    st.session_state.original_modeling = state_update["modelling"]
-                                    with st.expander("🔢 Mathematical Model", expanded=True):
-                                        modeling_dict = state_update["modelling"]
-                                        st.markdown(format_modeling_output(modeling_dict))
-                                    
-                                    # Break out of the loop - preprocessing and scripting will only run after feedback
-                                    add_log("⏸️ Waiting for user feedback on mathematical model...")
-                                    modeling_completed = True
-                                    break
+                        # Use Case output
+                        if "use_case" in state_update and "use_case" not in displayed_stages:
+                            if state_update.get("use_case"):
+                                displayed_stages.add("use_case")
+                                # (Optional) Early render container can go here if desired
+                        
+                        # FIX 2: Intercept cleanly, change execution state, and trigger a proactive rerun
+                        if "modelling" in state_update and "modelling" not in displayed_stages:
+                            if state_update.get("modelling"):
+                                displayed_stages.add("modelling")
+                                st.session_state.original_modeling = state_update["modelling"]
+                                st.session_state.show_modeling_intercept = True
+                                st.session_state.execution_running = False  # Stop the background running state
+                                
+                                add_log("⏸️ Waiting for user feedback on mathematical model...")
+                                st.rerun()  # Instantly break and re-render the clean UI
             
+            # Fallback if loop ends normally without hitting intercept
             st.session_state.execution_running = False
-            st.session_state.execution_complete = False  # Still waiting for feedback
-            
-            # Check if we should show modeling intercept
-            if (st.session_state.pipeline_state and 
-                "modelling" in st.session_state.pipeline_state and
-                st.session_state.pipeline_state["modelling"]):
-                st.session_state.show_modeling_intercept = True
-                st.session_state.original_modeling = st.session_state.pipeline_state["modelling"]
-            
+            st.session_state.execution_complete = True
             st.rerun()
         
         except Exception as e:
@@ -351,8 +364,23 @@ else:
             if st.session_state.pipeline_state.get("modelling") and not st.session_state.show_modeling_intercept:
                 with st.expander("🔢 Mathematical Model", expanded=True):
                     modeling_dict = st.session_state.pipeline_state["modelling"]
-                    st.markdown(format_modeling_output(modeling_dict))
+                    display_modeling_output(modeling_dict)
             
+            # Parameter Estimation output
+            if st.session_state.pipeline_state.get("parameter_estimation"):
+                pe = st.session_state.pipeline_state["parameter_estimation"]
+                with st.expander("📊 Parameter Estimation", expanded=True):
+                    col_vals, col_stats = st.columns([1, 2])
+                    with col_vals:
+                        st.subheader("Estimated Values")
+                        st.json(pe.get("parameter_values", {}))
+                    
+                    if pe.get("parameter_rationales"):
+                        with col_stats:
+                            st.subheader("Estimation Rationales")
+                            for param, rationale in pe.get("parameter_rationales", {}).items():
+                                st.markdown(f"**{param}**: {rationale}")
+
             # Preprocessing output
             if st.session_state.pipeline_state.get("preprocessing"):
                 preprocessing = st.session_state.pipeline_state["preprocessing"]
@@ -401,18 +429,18 @@ else:
             with st.expander("🔢 Mathematical Model (Review & Edit)", expanded=True):
                 # Display formatted modeling
                 modeling_dict = st.session_state.original_modeling or st.session_state.pipeline_state.get("modelling")
-                st.markdown(format_modeling_output(modeling_dict))
+                display_modeling_output(modeling_dict)
                 
                 st.divider()
                 
                 # Edit controls
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.button("✅ Approve & Continue", use_container_width=True):
+                    if st.button("✅ Approve & Continue", width="stretch"):
                         try:
                             # Run the downstream agents without feedback
                             with st.spinner("⏳ Running preprocessing and solver agents..."):
-                                preprocessing_output, scripting_output = run_downstream_agents(
+                                updated_modeling, pe_output, preprocessing_output, scripting_output = run_downstream_agents(
                                     csv_file_path=st.session_state.csv_path,
                                     use_case=st.session_state.pipeline_state.get("use_case", {}),
                                     modelling=st.session_state.original_modeling or st.session_state.pipeline_state.get("modelling", {}),
@@ -420,6 +448,8 @@ else:
                                 )
                                 
                                 # Update pipeline state with outputs
+                                st.session_state.pipeline_state["modelling"] = updated_modeling
+                                st.session_state.pipeline_state["parameter_estimation"] = pe_output
                                 st.session_state.pipeline_state["preprocessing"] = preprocessing_output
                                 st.session_state.pipeline_state["scripting"] = scripting_output
                                 st.session_state.show_modeling_intercept = False
@@ -435,6 +465,7 @@ else:
                 with col2:
                     if st.button("✏️ Edit & Re-run", use_container_width=True):
                         st.session_state.modeling_edit_mode = True
+                        st.rerun()
                 
                 with col3:
                     if st.button("❌ Cancel Analysis", use_container_width=True):
@@ -459,14 +490,14 @@ else:
                     
                     col_save, col_cancel = st.columns(2)
                     with col_save:
-                        if st.button("🔄 Re-run with Feedback", use_container_width=True):
+                        if st.button("🔄 Re-run with Feedback", width="stretch"):
                             if not feedback_text.strip():
                                 st.error("Please provide feedback before re-running")
                             else:
                                 try:
                                     # Rerun all downstream agents with feedback
                                     with st.spinner("⏳ Processing feedback and regenerating all models..."):
-                                        updated_modeling, updated_preprocessing, updated_scripting = rerun_modeling_with_feedback(
+                                        updated_modeling, updated_pe, updated_preprocessing, updated_scripting = rerun_modeling_with_feedback(
                                             csv_file_path=st.session_state.csv_path,
                                             feedback=feedback_text,
                                             use_case=st.session_state.pipeline_state.get("use_case", {}),
@@ -476,6 +507,7 @@ else:
                                         
                                         # Update pipeline state with ALL new outputs
                                         st.session_state.pipeline_state["modelling"] = updated_modeling
+                                        st.session_state.pipeline_state["parameter_estimation"] = updated_pe
                                         st.session_state.pipeline_state["preprocessing"] = updated_preprocessing
                                         st.session_state.pipeline_state["scripting"] = updated_scripting
                                         st.session_state.modeling_edited_content = updated_modeling
@@ -492,7 +524,7 @@ else:
                                     add_log(f"Error processing feedback: {str(e)}", level="error")
                     
                     with col_cancel:
-                        if st.button("Cancel Feedback", use_container_width=True):
+                        if st.button("Cancel Feedback", width="stretch"):
                             st.session_state.modeling_edit_mode = False
                             st.rerun()
     
@@ -521,7 +553,7 @@ else:
             data=results_json,
             file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json",
-            use_container_width=True
+            width="stretch"
         )
         
         # Summary
@@ -543,7 +575,3 @@ else:
         st.error("❌ Analysis Failed")
         st.error(f"Error in stage: {st.session_state.error_stage}")
         st.error(f"Details: {st.session_state.last_error}")
-
-
-
-

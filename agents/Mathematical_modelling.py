@@ -59,10 +59,6 @@ def _persist_outputs(recommendation: ModellingRecommendation) -> None:
             "\n".join(item.strip() for item in recommendation.constraint_functions),
             encoding="utf-8",
         )
-        (outputs_dir / "llm_output.md").write_text(
-            recommendation.readable_documentation.strip(),
-            encoding="utf-8",
-        )
     except OSError as io_err:
         # Non-fatal: the agent result is still valid; we just could not persist
         # the side-output files (e.g. in CI or a read-only environment).
@@ -93,53 +89,50 @@ def run_mathematical_modelling_agent(
     if not resolved_csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
 
-    @tool
-    def get_column_names() -> dict[str, Any]:
-        """Returns available columns and a compact preview from the selected CSV."""
-        df_preview = pd.read_csv(resolved_csv_path, nrows=preview_rows)
-        return {
-            "csv_file_path": str(resolved_csv_path),
-            "columns": [str(column) for column in df_preview.columns.tolist()],
-            "preview_rows": df_preview.to_dict(orient="records"),
+    # Get column names and preview
+    df_preview = pd.read_csv(resolved_csv_path, nrows=preview_rows)
+    columns_info = {
+        "csv_file_path": str(resolved_csv_path),
+        "columns": [str(column) for column in df_preview.columns.tolist()],
+        "preview_rows": df_preview.to_dict(orient="records"),
+    }
+
+    # Get reference model
+    reference_model = _load_reference_model()
+
+    # Get use case recommendation
+    if use_case is None:
+        use_case_info = {
+            "use_case_name": "Production Planning",
+            "business_goal": "Optimize quantity to produce for each product.",
+            "objective_direction": "max",
+            "objective_variable": "total profit",
+            "decision_variables": ["production_quantity_per_product"],
+            "required_columns": [],
+            "constraints_to_consider": [],
+            "assumptions": ["Use-case recommendation missing; fallback context used."],
+            "rationale": "Fallback use case injected by modelling stage.",
         }
-
-    @tool
-    def get_reference_model() -> dict[str, Any]:
-        """Returns the reference model style for notation and structure."""
-        return _load_reference_model()
-
-    @tool
-    def get_use_case_recommendation() -> dict[str, Any]:
-        """Returns the selected upstream use-case recommendation."""
-        if use_case is None:
-            return {
-                "use_case_name": "Production Planning",
-                "business_goal": "Optimize quantity to produce for each product.",
-                "objective_direction": "max",
-                "objective_variable": "total profit",
-                "decision_variables": ["production_quantity_per_product"],
-                "required_columns": [],
-                "constraints_to_consider": [],
-                "assumptions": ["Use-case recommendation missing; fallback context used."],
-                "rationale": "Fallback use case injected by modelling stage.",
-            }
-
-        if isinstance(use_case, UseCaseRecommendation):
-            return use_case.model_dump()
-        return dict(use_case)
+    elif isinstance(use_case, UseCaseRecommendation):
+        use_case_info = use_case.model_dump()
+    else:
+        use_case_info = dict(use_case)
 
     prompt = load_system_prompt_result("modeling")
     agent = create_agent(
         model=build_chat_model(),
-        tools=[get_use_case_recommendation, get_column_names, get_reference_model],
+        tools=[],
         system_prompt=prompt.template,
         response_format=ModellingRecommendation,
     )
-    user_message = (
-        "Create a MILP formulation for optimizing production quantity per product "
-        "using only tool outputs."
-    )
-
+    user_message = f"""Create a MILP formulation for optimizing production quantity per product.
+                        CSV Data Information:
+                        {json.dumps(columns_info, indent=2)}
+                        Reference Model:
+                        {json.dumps(reference_model, indent=2)}
+                        Use Case Recommendation:
+                        {json.dumps(use_case_info, indent=2)}
+                        """
     response = invoke_agent_with_prompt_trace(
         agent,
         stage="modeling",

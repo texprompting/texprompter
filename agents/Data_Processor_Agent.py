@@ -106,7 +106,6 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
         outputs_dir = get_test_outputs_dir()
         objective_path = outputs_dir / "llm_objective_function.md"
         constraints_path = outputs_dir / "llm_constraints.md"
-        documentation_path = outputs_dir / "llm_output.md"
         constraints_raw = constraints_path.read_text(encoding="utf-8") if constraints_path.exists() else ""
         return {
             "mathematical_model": {
@@ -116,9 +115,6 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
                 "constraint_functions": [
                     line.strip() for line in constraints_raw.splitlines() if line.strip()
                 ],
-                "readable_documentation": documentation_path.read_text(encoding="utf-8").strip()
-                if documentation_path.exists()
-                else "",
             }
         }
 
@@ -135,7 +131,6 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
                 for item in model_dict.get("constraint_functions", [])
                 if str(item).strip()
             ],
-            "readable_documentation": str(model_dict.get("readable_documentation", "")).strip(),
         }
     }
 

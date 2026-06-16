@@ -2,79 +2,61 @@ import pandas as pd
 import pulp
 
 # Load data
-csv_file_path = "/home/bene/Documents/Coding/Uni/KI-Projekt/texprompter/data/optimization_pipeline_test_easy.csv"
-df = pd.read_csv(csv_file_path)
+df = pd.read_csv('/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpmy48smww.csv')
 
-# Define index set P
-P = df['Product_ID'].tolist()
+# Define set I
+I = df['Product_ID'].tolist()
 
-# Define parameters as dictionaries keyed by product ID
-c = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))
-M_A = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))
-M_B = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))
-L = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))
-R = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))
-D = dict(zip(df['Product_ID'], df['Max_Market_Demand']))
-m = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))
+# Define parameters
+p_i = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))
+a_i = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))
+b_i = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))
+l_i = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))
+r_i = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))
+L_i = dict(zip(df['Product_ID'], df['Min_Production_Requirement'].astype(float)))
+U_i = dict(zip(df['Product_ID'], df['Max_Market_Demand'].astype(float)))
 
-# Global resource capacities (external constants not in CSV)
-C_A = 1000  # Total available Machine A hours
-C_B = 800   # Total available Machine B hours
-C_L = 500   # Total available Labor hours
-C_R = 2000  # Total available Raw material units
+# Resource capacities (RHS constants)
+CAPACITY_A = 100.0
+CAPACITY_B = 120.0
+CAPACITY_L = 200.0
+CAPACITY_R = 600.0
 
-# Create the problem (maximization)
+# Create the problem
 prob = pulp.LpProblem("Production_Planning", pulp.LpMaximize)
 
-# Create decision variables (non-negative integers)
-x = pulp.LpVariable.dicts("Production", P, lowBound=0, cat='Integer')
+# Decision variables
+x = pulp.LpVariable.dicts("x", I, lowBound=0, upBound=None, cat='Continuous')
 
-# Objective function: Maximize total profit
-prob += pulp.lpSum([c[p] * x[p] for p in P]), "Total_Profit"
+# Apply lower and upper bounds to variables
+for i in I:
+    x[i].lowBound = L_i[i]
+    x[i].upBound = U_i[i]
+
+# Objective function
+prob += pulp.lpSum([p_i[i] * x[i] for i in I]), "Total_Profit"
 
 # Constraints
-# Machine A capacity
-prob += pulp.lpSum([M_A[p] * x[p] for p in P]) <= C_A, "Machine_A_Capacity"
+prob += pulp.lpSum([a_i[i] * x[i] for i in I]) <= CAPACITY_A, "Machine_A_Capacity"
+prob += pulp.lpSum([b_i[i] * x[i] for i in I]) <= CAPACITY_B, "Machine_B_Capacity"
+prob += pulp.lpSum([l_i[i] * x[i] for i in I]) <= CAPACITY_L, "Labor_Capacity"
+prob += pulp.lpSum([r_i[i] * x[i] for i in I]) <= CAPACITY_R, "Raw_Material_Capacity"
 
-# Machine B capacity
-prob += pulp.lpSum([M_B[p] * x[p] for p in P]) <= C_B, "Machine_B_Capacity"
-
-# Labor capacity
-prob += pulp.lpSum([L[p] * x[p] for p in P]) <= C_L, "Labor_Capacity"
-
-# Raw material capacity
-prob += pulp.lpSum([R[p] * x[p] for p in P]) <= C_R, "Raw_Material_Capacity"
-
-# Demand limits (upper bound)
-for p in P:
-    prob += x[p] <= D[p], f"Demand_Limit_{p}"
-
-# Minimum production requirements (lower bound)
-for p in P:
-    prob += x[p] >= m[p], f"Min_Production_{p}"
-
-# Solve the problem
-prob.solve()
+# Solve
+prob.solve(pulp.PULP_CBC_CMD(msg=0))
 
 # Extract results
-decision_variables = {p: pulp.value(x[p]) for p in P}
+decision_variables = {i: pulp.value(x[i]) for i in I}
 objective_value = pulp.value(prob.objective)
 solution_status = pulp.LpStatus[prob.status]
+solver_message = f"Solver status: {solution_status}"
 
-# Generate solver message based on status
-if solution_status == 'Optimal':
-    solver_message = "Optimal solution found."
-elif solution_status == 'Infeasible':
-    solver_message = "No feasible solution exists."
-elif solution_status == 'Unbounded':
-    solver_message = "The problem is unbounded."
-else:
-    solver_message = f"Solver status: {solution_status}"
-
-# Return the results in the requested schema
-results = {
+# Output schema
+output = {
     "decision_variables": decision_variables,
     "objective_value": objective_value,
     "solution_status": solution_status,
     "solver_message": solver_message
 }
+
+print(output)

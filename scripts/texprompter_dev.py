@@ -156,7 +156,7 @@ def start_mlflow_server() -> subprocess.Popen:
         "--host",
         "127.0.0.1",
         "--port",
-        "5000",
+        "8000",
         "--workers",
         "1",
     ]
@@ -177,7 +177,7 @@ def start_mlflow_server() -> subprocess.Popen:
     if proc.poll() is not None:
         print("[dev] MLflow server exited immediately.", file=sys.stderr)
         sys.exit(1)
-    print("[dev] MLflow UI: http://127.0.0.1:5000")
+    print("[dev] MLflow UI: http://127.0.0.1:8000")
     return proc
 
 

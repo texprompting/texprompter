@@ -1,4 +1,7 @@
-\sum_{i \in I} m_i x_i \le C_m
-\sum_{i \in I} a_i x_i \le C_a
-0 \le x_i \le M_i \quad \forall i \in I
-x_i \in \mathbb{Z}_{\ge 0} \quad \forall i \in I
+x_p \ge L_p \quad \forall p \in P
+x_p \le D_p \quad \forall p \in P
+\sum_{p \in P} a_p x_p \le C_A
+\sum_{p \in P} b_p x_p \le C_B
+\sum_{p \in P} l_p x_p \le C_L
+\sum_{p \in P} r_p x_p \le C_R
+x_p \in \mathbb{Z}_{\ge 0} \quad \forall p \in P

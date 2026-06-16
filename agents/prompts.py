@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Final
 
 PROMPT_NAMESPACE: Final = "texprompter"
-PROMPT_NAMES: Final = ("use_case", "modeling", "preprocessing", "scripting")
+PROMPT_NAMES: Final = ("use_case", "modeling", "parameter_estimation", "preprocessing", "scripting")
 
 
 class PromptLoadError(RuntimeError):

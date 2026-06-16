@@ -5,6 +5,7 @@ from typing import Any
 from orchestrator.pipeline import initialize_node, run_agent_node
 from schemas.basemodels import (
     ModellingRecommendation,
+    ParameterEstimationRecommendation,
     PreprocessingRecommendation,
     ScriptingRecommendation,
     UseCaseRecommendation,
@@ -147,6 +148,59 @@ def test_run_agent_node_modeling_receives_upstream_use_case(monkeypatch: Any) ->
     assert result_state.modelling.objective_function == "max z"
     assert captured.get("use_case") is not None
     assert result_state.traces[-1] == "modeling:ok"
+
+
+def test_run_agent_node_parameter_estimation_consumes_state(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_parameter_estimation_agent(**kwargs: Any) -> ParameterEstimationRecommendation:
+        captured.update(kwargs)
+        return ParameterEstimationRecommendation(
+            parameter_values={"C_A": 500.0},
+            parameter_rationales={"C_A": "estimated limit"},
+            updated_constraint_functions=["x <= 500"],
+            updated_objective_function="max z",
+            updated_readable_documentation="# Model Concrete",
+        )
+
+    monkeypatch.setattr("orchestrator.pipeline.run_parameter_estimation_agent", fake_run_parameter_estimation_agent)
+
+    result_state = run_agent_node(
+        "parameter_estimation",
+        {
+            "csv_file_path": "data/optimization_pipeline_test_easy.csv",
+            "preview_rows": 5,
+            "status": "ok",
+            "errors": [],
+            "traces": [],
+            "use_case": {
+                "use_case_name": "Production Planning",
+                "business_goal": "Maximize profit",
+                "objective_direction": "max",
+                "objective_variable": "profit",
+                "decision_variables": ["x_i"],
+                "required_columns": ["Product_ID"],
+                "constraints_to_consider": [],
+                "assumptions": [],
+                "rationale": "Test",
+            },
+            "modelling": {
+                "col_names_used": ["Product_ID"],
+                "parameters": [],
+                "variables": [],
+                "minimizing_problem": False,
+                "objective_function": "max z",
+                "constraint_functions": ["x <= C_A"],
+                "explanation_of_ILP": ["Test"],
+                "readable_documentation": "# Model",
+            },
+        },
+    )
+
+    assert result_state.parameter_estimation is not None
+    assert result_state.parameter_estimation.parameter_values == {"C_A": 500.0}
+    assert result_state.modelling.constraint_functions == ["x <= 500"]
+    assert result_state.traces[-1] == "parameter_estimation:ok"
 
 
 def test_run_agent_node_preprocessing_consumes_state(monkeypatch: Any) -> None:
