@@ -1,0 +1,1352 @@
+{
+  "metadata": {
+    "timestamp": "20260616_122151",
+    "csv_filename": "optimization_pipeline_test_medium.csv",
+    "initial_prompt": "",
+    "modeling_edited": false
+  },
+  "pipeline_state": {
+    "csv_file_path": "C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv",
+    "initial_prompt": "",
+    "plan": {
+      "goal": "Create a runnable PuLP optimization that recommends a quarterly production mix (units per SKU) to maximize profit subject to molding and assembly time capacities and per-SKU market limits, using the provided product-level CSV data.",
+      "tasks": [
+        {
+          "task_id": "data_inspection",
+          "task_type": "data_inspection",
+          "description": "Using the CSV summary provided, produce a concise structured data profile tailored for optimization. Specifically: (a) list all column names and their roles (decision-related, resource-related, demand-related, cost/revenue, categorical grouping); (b) report cardinalities and notable distributions (unique SKU count, how many color variants, number of suppliers and their frequency); (c) identify any missing or suspicious values from the preview/statistics (e.g., zeros, NaNs, negative values) and which columns would require validation when running on the full file; (d) propose reasonable interpretations for 'Previous_Quarter_Sales' and 'Max_Market_Capacity' (e.g., observed past demand vs. forecast cap) and flag which should act as demand upper-bounds; (e) produce a simple mapping table: CSV column -> model parameter name (e.g., 'Sale_Price_Per_Unit' -> price[s]). Return this as a JSON-like dictionary that later tasks will consume.",
+          "depends_on": [],
+          "expected_output": "JSON object containing: columns_roles, cardinalities (n_skus, n_colors, n_suppliers), data_quality_flags (missing/null candidates), semantic_interpretations for demand/capacity fields, and column_to_parameter mapping."
+        },
+        {
+          "task_id": "use_case_analysis_production_mixing",
+          "task_type": "use_case_analysis",
+          "description": "Decide the most valuable OR use case for this dataset and justify it. Analyze the data profile returned by 'data_inspection' and recommend a concrete optimization formulation (product-mix / production planning). Specify: (a) the objective (mathematical description in words, e.g., maximize profit = sum_x (price - material_cost) * x); (b) decision variables (name, domain: integer or continuous); (c) the binding constraints derived from the data (molding minutes total, assembly minutes total, per-SKU demand caps using 'Max_Market_Capacity', non-negativity, integrality); (d) optional/advanced constraints to consider if desired (supplier capacity aggregated, minimum production for high-rated SKUs, cardinality limits) and whether to include them by default; (e) a prioritized list of parameters that are missing from the CSV and must be set or defaulted (e.g., total molding and assembly available minutes for the planning period). For any missing numeric parameters, propose defensible default formulas based on the CSV (for example, set molding_capacity = sum(previous_quarter_sales * molding_mins_req) to reflect current capacity) and label them as configurable inputs. Return the chosen use case, the full list of model parameters required, and recommended defaults.",
+          "depends_on": [
+            "data_inspection"
+          ],
+          "expected_output": "JSON object describing: chosen_use_case, objective_formula (text), decision_variables (names and domains), constraint_specifications (list), list_of_required_parameters (with recommended default values/formulas and explanations)."
+        },
+        {
+          "task_id": "modeling_milp_formulation",
+          "task_type": "modeling",
+          "description": "Produce a clear MILP mathematical formulation based on the selected use case. Provide: (a) index sets (e.g. S = set of SKUs); (b) parameters (with names, types, and units) mapped from CSV columns and from the defaults proposed earlier; (c) decision variables (x_s integer >=0); (d) the objective function in algebraic form; (e) all constraints in algebraic form (resource constraints, demand caps, supplier aggregation if used); (f) comment on integrality (why integer) and potential scaling/normalization; (g) a short note on expected solution size and solver choice (PuLP CBC is fine). Return the formulation in a machine-readable structured form (JSON) that enumerates parameter names and their meaning so the coding task can directly consume them.",
+          "depends_on": [
+            "use_case_analysis_production_mixing"
+          ],
+          "expected_output": "JSON object with keys: sets, parameters (name,type,unit,source), variables (name,domain), objective (string + coefficients mapping), constraints (each as a dict with left-hand expression, operator, right-hand expression) and solver recommendation."
+        },
+        {
+          "task_id": "preprocessing_build_parameters",
+          "task_type": "preprocessing",
+          "description": "Write a Python preprocessing snippet that reads the CSV file (path given as a variable), validates key fields, and constructs the model parameter dictionaries expected by the MILP formulation. Specifically produce code that: (a) loads the CSV using pandas; (b) enforces/cleans types for numeric fields and fills or errors on missing values flagged earlier; (c) builds lists and dicts: SKUs (list of strings), price[s], material_cost[s], molding_time_per_unit[s], assembly_time_per_unit[s], demand_cap[s] (from Max_Market_Capacity), prev_sales[s], supplier_of[s]; (d) computes profit_per_unit[s] = price - material_cost; (e) computes default total_molding_capacity and total_assembly_capacity using the recommended formula from use_case_analysis (explicitly implement the default: total_capacity = sum(prev_sales * time_per_unit)); (f) computes supplier_capacity[supplier] = sum(prev_sales for SKUs of that supplier) as default; (g) provide a single CONFIG section at the top where the user can override defaults (e.g., set molding_capacity_override = None or numeric); (h) return/print a small summary (number SKUs, total default capacities, sample of parameter dicts). The code must be self-contained and produce Python dicts ready for the PuLP model in the next task.",
+          "depends_on": [
+            "data_inspection",
+            "modeling_milp_formulation"
+          ],
+          "expected_output": "A Python code string (ready to execute) that returns or assigns: skus, price, material_cost, molding_time, assembly_time, demand_cap, prev_sales, supplier_of, profit_per_unit, total_molding_capacity, total_assembly_capacity, supplier_capacity, and a small printed summary."
+        },
+        {
+          "task_id": "coding_pulp_solver",
+          "task_type": "coding",
+          "description": "Write the final runnable PuLP Python code that: (a) imports the preprocessing snippet (or includes it at top) to obtain the model parameters; (b) constructs a PuLP LpProblem to maximize total profit = sum_s profit_per_unit[s] * x[s]; (c) defines integer decision variables x[s] >= 0 for each SKU; (d) adds constraints: sum_s molding_time[s]*x[s] <= total_molding_capacity, sum_s assembly_time[s]*x[s] <= total_assembly_capacity, and for each s: x[s] <= demand_cap[s]; (e) optionally adds supplier capacity constraints: for each supplier, sum_{s in supplier} x[s] <= supplier_capacity[s]; (f) solves using PuLP's default solver, checks status, and prints a clear output: total profit, total units produced, resource utilizations (used/available and %), and a CSV-style listing of SKUs with produced_units, price, material_cost, profit_per_unit, and percent_of_demand_fulfilled (x[s]/demand_cap); (g) include comments explaining where to override the default capacities and how to switch solver. The code must be runnable as-is (assume pandas and pulp are installed) and robust to small data issues (e.g., cast types). Return the full code as a single string.",
+          "depends_on": [
+            "preprocessing_build_parameters",
+            "modeling_milp_formulation"
+          ],
+          "expected_output": "A single Python script (string) containing the preprocessing section (or import), PuLP model construction, solver call, and formatted result printing. It should be ready to copy-paste and run."
+        },
+        {
+          "task_id": "validation_syntax_and_smoke",
+          "task_type": "validation",
+          "description": "Statically check the generated PuLP Python code for syntax errors and obvious bugs. Specifically: (a) ensure all variables referenced are defined; (b) verify PuLP calls are correct (LpProblem, LpMaximize, LpVariable.dicts, lpSum, LpStatus, value); (c) check that the code imports necessary modules (pandas, pulp, math) and that function/variable names match those produced by preprocessing; (d) run a quick dry-run reasoning (no execution environment) to list potential runtime errors (e.g., division by zero when demand_cap[s] = 0) and suggest small defensive checks to add to the code; (e) return a checklist indicating pass/fail for syntax, name-consistency, PuLP API usage, and recommended fixes. This task MUST consume the code output of 'coding_pulp_solver'.",
+          "depends_on": [
+            "coding_pulp_solver"
+          ],
+          "expected_output": "JSON object checklist with fields: syntax_check (pass/fail + notes), name_consistency (pass/fail + notes), pulp_api_usage (pass/fail + notes), runtime_risks (list), suggested_fixes (list)."
+        }
+      ]
+    },
+    "results": [
+      {
+        "task_id": "data_inspection",
+        "status": "ok",
+        "output": {
+          "reasoning": "Used provided CSV summary (column list, preview, dtypes, describe, unique-values) to build an optimization-focused profile. Flagged columns that are parameters vs. groupings vs. resource-consumption. Highlighted cardinalities, top frequencies visible in the summary, and statistical anomalies/outliers and likely unit-mismatch between Previous_Quarter_Sales and Max_Market_Capacity. Produced a compact mapping from CSV columns to model parameter names that downstream optimization tasks can consume.",
+          "result": {
+            "row_count": 80,
+            "columns_roles": {
+              "Product_SKU": [
+                "index",
+                "decision-related (item)"
+              ],
+              "Color_Variant": [
+                "categorical grouping / attribute (variant)",
+                "filter/segment"
+              ],
+              "Sale_Price_Per_Unit": [
+                "cost/revenue (price)"
+              ],
+              "Material_Cost_Per_Unit": [
+                "cost (material)"
+              ],
+              "Supplier_ID": [
+                "categorical grouping (supplier)",
+                "resource/source grouping"
+              ],
+              "Molding_Mins_Req": [
+                "resource-related (machine time per unit)"
+              ],
+              "Assembly_Mins_Req": [
+                "resource-related (labor/assembly time per unit)"
+              ],
+              "Previous_Quarter_Sales": [
+                "demand-related (observed past demand)"
+              ],
+              "Max_Market_Capacity": [
+                "demand-related (market/demand upper-bound)"
+              ],
+              "Customer_Rating_Avg": [
+                "categorical/continuous attribute (quality / priority score)"
+              ]
+            },
+            "cardinalities_and_distributions": {
+              "n_skus": 80,
+              "n_colors": 6,
+              "n_suppliers": 4,
+              "notable_frequencies": {
+                "most_common_color": {
+                  "value": "Silver",
+                  "frequency": 18
+                },
+                "most_common_supplier": {
+                  "value": "SUP-X9",
+                  "frequency": 26
+                },
+                "notes": "The summary shows Product_SKU is unique for every row (80 unique SKUs). Colors are a small set (6), and suppliers are just 4 distinct IDs. For full frequency distributions (per-supplier counts other than top) compute value_counts on the full file."
+              },
+              "numeric_summaries_that_matter_for_OR": {
+                "Sale_Price_Per_Unit": {
+                  "mean": 112.26,
+                  "min": 40.68,
+                  "max": 295.77,
+                  "std": 69.81
+                },
+                "Material_Cost_Per_Unit": {
+                  "mean": 65.42,
+                  "min": 8.85,
+                  "max": 252.69,
+                  "std": 78.44
+                },
+                "Molding_Mins_Req": {
+                  "mean": 23.77,
+                  "min": 5.1,
+                  "max": 89.3,
+                  "std": 22.87
+                },
+                "Assembly_Mins_Req": {
+                  "mean": 24.12,
+                  "min": 11.4,
+                  "max": 59.4,
+                  "std": 12.88
+                },
+                "Previous_Quarter_Sales": {
+                  "mean": 2539.29,
+                  "min": 125,
+                  "max": 4919,
+                  "std": 1392.87
+                },
+                "Max_Market_Capacity": {
+                  "mean": 456.88,
+                  "min": 110,
+                  "max": 781,
+                  "std": 193.5
+                },
+                "Customer_Rating_Avg": {
+                  "mean": 4.0075,
+                  "min": 3.0,
+                  "max": 5.0,
+                  "std": 0.59699
+                }
+              }
+            },
+            "data_quality_flags": {
+              "general": [
+                "All columns show non-null counts = 80 in provided summary, but full-file validation should re-check for missing/nulls.",
+                "Data types: Product_SKU/Color_Variant/Supplier_ID are object (categorical). Numeric columns mostly float64; two demand/capacity columns are int64."
+              ],
+              "columns_to_validate_prior_to_model_run": {
+                "Product_SKU": [
+                  "Check uniqueness and naming convention. Summary shows 80 unique SKUs (one per row). If same logical SKU appears in multiple rows (e.g., per color), ensure SKU encoding matches modeling intent."
+                ],
+                "Color_Variant": [
+                  "Verify consistent spelling/casing for variants (e.g., 'Neon Pink' vs 'neon pink')."
+                ],
+                "Sale_Price_Per_Unit": [
+                  "Confirm currency and units. No zeros/negatives in preview but check full file for zeros or negative prices."
+                ],
+                "Material_Cost_Per_Unit": [
+                  "Confirm currency and that extremely large values (max 252.69 vs mean 65.42) are valid and not data-entry errors."
+                ],
+                "Molding_Mins_Req": [
+                  "Inspect high outlier (max 89.3 mins) relative to mean (23.77). Confirm units (minutes) and that decimals are expected."
+                ],
+                "Assembly_Mins_Req": [
+                  "Check for outliers (max 59.4) and confirm units and measurement granularity."
+                ],
+                "Previous_Quarter_Sales": [
+                  "Critical: large magnitudes (mean ~2,539) vs Max_Market_Capacity (mean ~457) suggest a units mismatch or different aggregation windows. Validate time-window and units (units/quarter? units/month?). Ensure integer type is appropriate and no negative values."
+                ],
+                "Max_Market_Capacity": [
+                  "Interpretation unclear due to scale difference vs Previous_Quarter_Sales. Validate that this represents an upper bound in the same units/timeframe as Previous_Quarter_Sales if it is to be used as demand cap."
+                ],
+                "Customer_Rating_Avg": [
+                  "Check range (3.0-5.0 in preview). Confirm missing ratings are coded as NaN and not as sentinel values (0 or -1)."
+                ]
+              },
+              "suspicious_patterns": [
+                "Apparent unit/aggregation mismatch: Previous_Quarter_Sales >> Max_Market_Capacity. This is the most important sanity check before treating Max_Market_Capacity as a demand cap.",
+                "Material cost and price distributions have large spread; check for negative margins (price < material cost) in full file if that is not expected.",
+                "Molding_Mins_Req and Assembly_Mins_Req have large relative std-dev; confirm these are per-unit requirements, not totals."
+              ]
+            },
+            "semantic_interpretations_for_demand_and_capacity": {
+              "Previous_Quarter_Sales": {
+                "recommended_interpretation": "Observed historical demand (units sold) over the previous quarter (or whatever historical window the dataset uses). Use as baseline demand estimate or input to demand forecasting.",
+                "model_role_suggestion": "demand_observed[s] (input). Can be used to estimate forecasted demand or as a lower/expected demand in the objective/constraints.",
+                "validation_needed": "Confirm aggregation window (quarter) and units. If it truly is quarterly units, it may need to be converted to the same time unit as Max_Market_Capacity before being compared or used as caps."
+              },
+              "Max_Market_Capacity": {
+                "recommended_interpretation": "An upper bound on potential sales for the SKU (market size or channel cap) within a comparable period OR the production/market capacity limit for that SKU.",
+                "model_role_suggestion": "demand_upper_bound[s] (constraint). If units/timeframe align with Previous_Quarter_Sales, treat this as the maximum demand allowed; otherwise, re-scale or obtain correct cap in matching units.",
+                "validation_needed": "Because Max_Market_Capacity values are much smaller than Previous_Quarter_Sales in the preview, explicitly verify units/timeframe. Only use as an upper-bound after confirming alignment."
+              },
+              "flagged_as_upper_bounds": [
+                "Max_Market_Capacity -> candidate demand upper-bound (ONLY AFTER unit/timeframe validation).",
+                "Previous_Quarter_Sales -> not an upper-bound by itself (it is observed demand) but can be used to inform expected demand or as a target; it could act as a lower-bound/forecast if desired."
+              ]
+            },
+            "column_to_parameter_mapping": {
+              "Product_SKU": "SKUs (set index, s)",
+              "Color_Variant": "color[s] (categorical attribute of SKU s)",
+              "Sale_Price_Per_Unit": "price[s]  # revenue per unit of s",
+              "Material_Cost_Per_Unit": "material_cost[s]  # variable cost per unit of s",
+              "Supplier_ID": "supplier[s]  # supplier id for SKU s (categorical), or supplier_set with supplier_of_s relation",
+              "Molding_Mins_Req": "molding_time_per_unit[s]  # minutes of molding per unit of s",
+              "Assembly_Mins_Req": "assembly_time_per_unit[s]  # minutes of assembly per unit of s",
+              "Previous_Quarter_Sales": "prev_quarter_sales[s]  # observed demand (units) in previous quarter for s",
+              "Max_Market_Capacity": "max_market_capacity[s]  # maximum market demand / cap for s (upper bound candidate)",
+              "Customer_Rating_Avg": "rating[s]  # quality/priority score (0-5) for s"
+            }
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "use_case_analysis_production_mixing",
+        "status": "ok",
+        "output": {
+          "reasoning": "The dataset contains per-SKU revenue, material cost, two per-unit resource requirements (molding and assembly minutes), historical sales and a per-SKU market cap. This is a classic product\u2011mix / production\u2011planning problem: choose how many units of each SKU to produce (and sell) in a planning period to maximize profit subject to molding and assembly capacity and market-demand caps. The single highest-value OR use case is therefore a production planning / product-mix optimizer that maximizes contribution margin (revenue minus variable material cost) per SKU while respecting limited molding and assembly time and per-SKU demand limits. Labor/minute costs and supplier capacities are not present in the CSV and are optional extensions; defensible default capacity values can be constructed from previous quarter activity so the model is runnable out-of-the-box but user-configurable.",
+          "result": {
+            "chosen_use_case": "Product-mix / production planning to maximize contribution margin (profit proxy) subject to molding and assembly time limits and market demand caps per SKU.",
+            "objective_formula": "Maximize total contribution = sum_{s in SKUs} (Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s]) * x_s. (If user supplies per-minute labor costs, objective can be extended to subtract molding and assembly labor cost: sum_s (price[s] - material_cost[s] - molding_cost_per_min * Molding_Mins_Req[s] - assembly_cost_per_min * Assembly_Mins_Req[s]) * x_s.)",
+            "decision_variables": [
+              {
+                "name": "x_s",
+                "description": "Units of Product_SKU s to produce (and sell) in the planning period",
+                "domain": "integer, x_s >= 0 (can be relaxed to continuous if volumes are large and integrality not critical)"
+              }
+            ],
+            "constraint_specifications": [
+              {
+                "name": "Molding_capacity_constraint",
+                "formula_text": "sum_{s} Molding_Mins_Req[s] * x_s <= molding_capacity_total_minutes",
+                "columns_used": [
+                  "Product_SKU",
+                  "Molding_Mins_Req"
+                ],
+                "binding": true
+              },
+              {
+                "name": "Assembly_capacity_constraint",
+                "formula_text": "sum_{s} Assembly_Mins_Req[s] * x_s <= assembly_capacity_total_minutes",
+                "columns_used": [
+                  "Product_SKU",
+                  "Assembly_Mins_Req"
+                ],
+                "binding": true
+              },
+              {
+                "name": "Per_SKU_market_cap",
+                "formula_text": "0 <= x_s <= Max_Market_Capacity[s]  for each SKU s",
+                "columns_used": [
+                  "Product_SKU",
+                  "Max_Market_Capacity"
+                ],
+                "binding": true,
+                "note": "Use Max_Market_Capacity only after the user confirms it is in the same time window as the planning period. If unreliable, allow user to supply demand_forecast_cap[s] instead."
+              },
+              {
+                "name": "Optional_demand_floor_based_on_history",
+                "formula_text": "x_s >= demand_floor_fraction * Previous_Quarter_Sales[s]  for prioritized SKUs (optional)",
+                "columns_used": [
+                  "Product_SKU",
+                  "Previous_Quarter_Sales",
+                  "Customer_Rating_Avg"
+                ],
+                "binding": false,
+                "note": "Useful if business needs to preserve service levels or keep production close to historical levels; enable only if desired."
+              },
+              {
+                "name": "Supplier_capacity_aggregate (optional)",
+                "formula_text": "For each supplier k: sum_{s supplied_by_k} x_s <= supplier_capacity[k]",
+                "columns_used": [
+                  "Product_SKU",
+                  "Supplier_ID"
+                ],
+                "binding": false,
+                "note": "Requires per-supplier capacity limits which are not in the CSV by default."
+              },
+              {
+                "name": "Integrality_nonnegativity",
+                "formula_text": "x_s integer and x_s >= 0 for all s",
+                "binding": true
+              }
+            ],
+            "list_of_required_parameters": [
+              {
+                "parameter_name": "molding_capacity_total_minutes",
+                "required": true,
+                "recommended_default_formula": "sum_s (Previous_Quarter_Sales[s] * Molding_Mins_Req[s])",
+                "recommended_default_explanation": "Set capacity to the total molding minutes used in the previous quarter (i.e., assume current capacity equals past production). This yields a baseline feasible capacity. Make this configurable; users may increase by capacity_buffer_factor (e.g., 1.05) if they expect expansion.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "assembly_capacity_total_minutes",
+                "required": true,
+                "recommended_default_formula": "sum_s (Previous_Quarter_Sales[s] * Assembly_Mins_Req[s])",
+                "recommended_default_explanation": "Analogous to molding capacity: default to historical total assembly minutes used. Configurable and can be scaled by a factor for expected changes.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "planning_period_label_and_time_unit",
+                "required": true,
+                "recommended_default_value": "\"previous_quarter\" (use same period as Previous_Quarter_Sales unless user specifies otherwise)",
+                "recommended_default_explanation": "Clarifies the time window for capacities and Max_Market_Capacity. Important because Previous_Quarter_Sales and Max_Market_Capacity may be on different time bases.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "use_max_market_capacity_as_demand_cap_flag",
+                "required": true,
+                "recommended_default_value": "true (but user must confirm units/timeframes align). If not aligned, user should provide demand_forecast_cap[s].",
+                "recommended_default_explanation": "If Max_Market_Capacity is valid for the planning period, use it as upper bound. Otherwise, replace with user-supplied demand caps.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "demand_forecast_cap[s] (optional replacement for Max_Market_Capacity)",
+                "required": false,
+                "recommended_default_formula": "If Max_Market_Capacity is suspect, set demand_forecast_cap[s] = Previous_Quarter_Sales[s] (or min(Previous_Quarter_Sales[s], Max_Market_Capacity[s]) if both believed partially valid).",
+                "recommended_default_explanation": "Provides a conservative, history-based demand cap when Max_Market_Capacity appears inconsistent.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "labor_cost_per_molding_minute (optional)",
+                "required": false,
+                "recommended_default_value": 0.0,
+                "recommended_default_explanation": "CSV does not include per-minute labor cost for molding. Default to 0 so objective uses contribution margin from price - material_cost. If provided, objective should be extended to subtract molding_cost_per_min * Molding_Mins_Req[s].",
+                "configurable": true
+              },
+              {
+                "parameter_name": "labor_cost_per_assembly_minute (optional)",
+                "required": false,
+                "recommended_default_value": 0.0,
+                "recommended_default_explanation": "Same rationale as molding labor cost. If set >0, include in objective as assembly_cost_per_min * Assembly_Mins_Req[s].",
+                "configurable": true
+              },
+              {
+                "parameter_name": "supplier_capacity[k] (optional)",
+                "required": false,
+                "recommended_default_value": "not set by default; if needed, set supplier_capacity[k] = sum_{s supplied_by_k} Previous_Quarter_Sales[s]",
+                "recommended_default_explanation": "No per-supplier capacities in CSV. Defaulting to historical supply volume per supplier is defensible; include only if supplier constraints are important.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "demand_floor_fraction and rating_threshold (optional business-rule for minimum production)",
+                "required": false,
+                "recommended_default_value": "not active by default; example defaults: rating_threshold = 4.5, demand_floor_fraction = 0.5",
+                "recommended_default_explanation": "If business requires minimum production for high-rated products, these parameters control that rule. Disabled by default.",
+                "configurable": true
+              },
+              {
+                "parameter_name": "integrality_flag",
+                "required": true,
+                "recommended_default_value": "true (integer x_s). If performance / scale requires, solver can relax to continuous.",
+                "recommended_default_explanation": "Keep integer by default because units are discrete; allow continuous relaxation in large-scale approximations.",
+                "configurable": true
+              }
+            ],
+            "notes_and_implementation_guidance": [
+              "Objective choice: using (Sale_Price_Per_Unit - Material_Cost_Per_Unit) as the variable profit per unit is defensible given the data. If true manufacturing labor costs exist, supply molding/assembly per-minute costs to include them in the objective.",
+              "Validation step required before running: confirm that Max_Market_Capacity and Previous_Quarter_Sales are on the same time basis (both quarterly or both monthly). The data_inspection flagged a likely mismatch (Previous_Quarter_Sales much larger than Max_Market_Capacity) \u2014 if mismatch is confirmed, use demand_forecast_cap[s] derived from historical sales or obtain corrected market caps.",
+              "Default capacities set equal to historical usage make the model immediately solvable and reflect current throughput. If the business wants to plan for expansion or a shorter planning period, scale the defaults by a buffer or change the planning_period_label.",
+              "Optional advanced constraints (supplier aggregated caps, minimum production for high-rated SKUs, cardinality limits on number of SKUs produced) are recommended only when business rules require them; keep them disabled by default to keep the model simple and tractable."
+            ]
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "modeling_milp_formulation",
+        "status": "ok",
+        "output": {
+          "reasoning": "Formulate a product-mix MILP using the CSV columns and the defaults proposed earlier. Provide sets, parameters (mapped to CSV columns or defaults), integer decision variables, an objective maximizing contribution margin (with optional labor costs), and constraints for molding/assembly capacity and per-SKU demand caps. Present everything in a machine-consumable JSON structure with algebraic expressions suitable for direct implementation in PuLP/CBC or other MILP solvers.",
+          "result": {
+            "sets": {
+              "S": {
+                "description": "Set of SKUs (product items). Index s ranges over all Product_SKU rows in the CSV.",
+                "example_source_column": "Product_SKU",
+                "size": 80
+              },
+              "K": {
+                "description": "Set of suppliers (used only if supplier-level constraints are activated). Index k ranges over unique Supplier_ID values in the CSV.",
+                "example_source_column": "Supplier_ID",
+                "size_estimate": 4
+              }
+            },
+            "parameters": {
+              "Sale_Price_Per_Unit[s]": {
+                "type": "float",
+                "unit": "currency per unit",
+                "source": "CSV column 'Sale_Price_Per_Unit'",
+                "description": "Revenue when one unit of SKU s is sold."
+              },
+              "Material_Cost_Per_Unit[s]": {
+                "type": "float",
+                "unit": "currency per unit",
+                "source": "CSV column 'Material_Cost_Per_Unit'",
+                "description": "Variable material cost required to produce one unit of SKU s."
+              },
+              "Molding_Mins_Req[s]": {
+                "type": "float",
+                "unit": "minutes per unit",
+                "source": "CSV column 'Molding_Mins_Req'",
+                "description": "Molding time required to produce one unit of SKU s."
+              },
+              "Assembly_Mins_Req[s]": {
+                "type": "float",
+                "unit": "minutes per unit",
+                "source": "CSV column 'Assembly_Mins_Req'",
+                "description": "Assembly time required to produce one unit of SKU s."
+              },
+              "Previous_Quarter_Sales[s]": {
+                "type": "float",
+                "unit": "units (previous quarter)",
+                "source": "CSV column 'Previous_Quarter_Sales'",
+                "description": "Historical sales (used to derive default capacities or demand caps)."
+              },
+              "Max_Market_Capacity[s]": {
+                "type": "float",
+                "unit": "units (per planning period)",
+                "source": "CSV column 'Max_Market_Capacity'",
+                "description": "Upper bound on demand for SKU s as provided in the CSV. MUST be checked to be on same time base as planning_period."
+              },
+              "Customer_Rating_Avg[s]": {
+                "type": "float",
+                "unit": "rating (e.g., 1-5)",
+                "source": "CSV column 'Customer_Rating_Avg'",
+                "description": "Average customer rating for SKU s (optional business-rule usage)."
+              },
+              "Supplier_of_s[s]": {
+                "type": "string",
+                "unit": "identifier",
+                "source": "CSV column 'Supplier_ID'",
+                "description": "Supplier ID for SKU s (used if supplier-level aggregate constraints enabled)."
+              },
+              "planning_period_label": {
+                "type": "string",
+                "unit": "n/a",
+                "source": "user-specified default: 'previous_quarter'",
+                "description": "Label for the planning period. Defaults to 'previous_quarter' to match Previous_Quarter_Sales units."
+              },
+              "use_max_market_capacity_flag": {
+                "type": "boolean",
+                "unit": "n/a",
+                "source": "user-configurable default: true",
+                "description": "If true, use Max_Market_Capacity[s] as the demand cap; otherwise use demand_forecast_cap[s] or Previous_Quarter_Sales[s]."
+              },
+              "demand_forecast_cap[s]": {
+                "type": "float",
+                "unit": "units (per planning period)",
+                "source": "user-provided or default computed",
+                "description": "User-supplied demand cap for SKU s for the planning period. Default if not provided: if use_max_market_capacity_flag is true then Max_Market_Capacity[s], else Previous_Quarter_Sales[s]."
+              },
+              "molding_capacity_total_minutes": {
+                "type": "float",
+                "unit": "minutes (per planning period)",
+                "source": "user-provided or default computed",
+                "default_formula": "sum_{s in S} Previous_Quarter_Sales[s] * Molding_Mins_Req[s]",
+                "description": "Total available molding minutes in the planning period. Default: historical molding minutes used in previous quarter."
+              },
+              "assembly_capacity_total_minutes": {
+                "type": "float",
+                "unit": "minutes (per planning period)",
+                "source": "user-provided or default computed",
+                "default_formula": "sum_{s in S} Previous_Quarter_Sales[s] * Assembly_Mins_Req[s]",
+                "description": "Total available assembly minutes in the planning period. Default: historical assembly minutes used in previous quarter."
+              },
+              "molding_cost_per_min": {
+                "type": "float",
+                "unit": "currency per minute",
+                "source": "user-configurable default: 0.0",
+                "description": "Labor/overhead cost charged per molding minute. Optional; defaults to 0 so objective uses sale price - material cost only."
+              },
+              "assembly_cost_per_min": {
+                "type": "float",
+                "unit": "currency per minute",
+                "source": "user-configurable default: 0.0",
+                "description": "Labor/overhead cost charged per assembly minute. Optional; defaults to 0."
+              },
+              "supplier_capacity[k]": {
+                "type": "float",
+                "unit": "units (per planning period)",
+                "source": "user-configurable default: sum_{s with Supplier_of_s[s]==k} Previous_Quarter_Sales[s]",
+                "description": "Optional per-supplier capacity (aggregate across SKUs supplied by k). Not present in CSV; default defensible setting equals historical supplied volume."
+              },
+              "demand_floor_fraction": {
+                "type": "float (0-1)",
+                "unit": "dimensionless",
+                "source": "user-configurable default: 0.0 (disabled)",
+                "description": "Optional fraction of Previous_Quarter_Sales enforced as minimum production for selected SKUs. Default 0 => disabled."
+              },
+              "rating_threshold_for_floor": {
+                "type": "float",
+                "unit": "rating (e.g., 1-5)",
+                "source": "user-configurable default: 4.5",
+                "description": "If demand-floor rule enabled, apply to SKUs with Customer_Rating_Avg[s] >= rating_threshold_for_floor."
+              },
+              "integrality_flag": {
+                "type": "boolean",
+                "unit": "n/a",
+                "source": "user-configurable default: true",
+                "description": "If true, decision variables x_s are integer. Default true because units are discrete."
+              }
+            },
+            "derived_parameters": {
+              "profit_per_unit[s]": {
+                "formula": "Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s] - molding_cost_per_min * Molding_Mins_Req[s] - assembly_cost_per_min * Assembly_Mins_Req[s]",
+                "type": "float",
+                "unit": "currency per unit",
+                "description": "Contribution margin per unit of SKU s after optional per-minute labor costs are subtracted. If molding_cost_per_min and assembly_cost_per_min are 0, this reduces to Sale_Price_Per_Unit - Material_Cost_Per_Unit."
+              },
+              "demand_cap_used[s]": {
+                "formula": "if use_max_market_capacity_flag then Max_Market_Capacity[s] else demand_forecast_cap[s] (fallback: Previous_Quarter_Sales[s])",
+                "type": "float",
+                "unit": "units (per planning period)",
+                "description": "Effective upper demand bound used in the model for SKU s."
+              }
+            },
+            "variables": {
+              "x_s for s in S": {
+                "domain": "integer nonnegative (Z_+)",
+                "description": "Number of units of SKU s to produce (and sell) in the planning period; if integrality_flag==false can be relaxed to continuous >=0"
+              }
+            },
+            "objective": {
+              "sense": "maximize",
+              "expression": "Maximize Z = sum_{s in S} profit_per_unit[s] * x_s",
+              "explanation": "Maximize total contribution margin over produced units. profit_per_unit[s] defined in derived_parameters.",
+              "coefficients_mapping": {
+                "coefficient_name": "profit_per_unit[s]",
+                "definition": "Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s] - molding_cost_per_min * Molding_Mins_Req[s] - assembly_cost_per_min * Assembly_Mins_Req[s]",
+                "source_columns": [
+                  "Sale_Price_Per_Unit",
+                  "Material_Cost_Per_Unit",
+                  "Molding_Mins_Req",
+                  "Assembly_Mins_Req"
+                ],
+                "defaults_used": [
+                  "molding_cost_per_min (default 0.0)",
+                  "assembly_cost_per_min (default 0.0)"
+                ]
+              }
+            },
+            "constraints": [
+              {
+                "name": "Molding capacity",
+                "lhs": "sum_{s in S} Molding_Mins_Req[s] * x_s",
+                "operator": "<=",
+                "rhs": "molding_capacity_total_minutes",
+                "used_parameters": [
+                  "Molding_Mins_Req[s]",
+                  "x_s",
+                  "molding_capacity_total_minutes"
+                ],
+                "optional": false,
+                "notes": "Enforces that total molding minutes used do not exceed available molding minutes in planning period."
+              },
+              {
+                "name": "Assembly capacity",
+                "lhs": "sum_{s in S} Assembly_Mins_Req[s] * x_s",
+                "operator": "<=",
+                "rhs": "assembly_capacity_total_minutes",
+                "used_parameters": [
+                  "Assembly_Mins_Req[s]",
+                  "x_s",
+                  "assembly_capacity_total_minutes"
+                ],
+                "optional": false,
+                "notes": "Enforces that total assembly minutes used do not exceed available assembly minutes in planning period."
+              },
+              {
+                "name": "Per-SKU demand cap (upper bound)",
+                "lhs": "x_s  for each s in S",
+                "operator": "<=",
+                "rhs": "demand_cap_used[s]",
+                "used_parameters": [
+                  "demand_cap_used[s]",
+                  "x_s"
+                ],
+                "optional": false,
+                "notes": "Upper bound per SKU; demand_cap_used[s] is taken from Max_Market_Capacity if use_max_market_capacity_flag==true, otherwise from demand_forecast_cap or Previous_Quarter_Sales as fallback."
+              },
+              {
+                "name": "Nonnegativity and integrality",
+                "lhs": "x_s",
+                "operator": ">=",
+                "rhs": "0, integer if integrality_flag==true else continuous",
+                "used_parameters": [
+                  "integrality_flag"
+                ],
+                "optional": false,
+                "notes": "x_s are nonnegative and integer by default; may be relaxed to continuous if needed for performance."
+              },
+              {
+                "name": "Optional supplier capacity (aggregate per supplier)",
+                "lhs": "for each k in K: sum_{s in S with Supplier_of_s[s]==k} x_s",
+                "operator": "<=",
+                "rhs": "supplier_capacity[k]",
+                "used_parameters": [
+                  "Supplier_of_s[s]",
+                  "supplier_capacity[k]",
+                  "x_s"
+                ],
+                "optional": true,
+                "notes": "Enable only if supplier_capacity[k] values are supplied/valid. Default suggestion: supplier_capacity[k] = sum historical supplied units (Previous_Quarter_Sales for SKUs from k)."
+              },
+              {
+                "name": "Optional demand floor for high-rated SKUs",
+                "lhs": "for each s in S with Customer_Rating_Avg[s] >= rating_threshold_for_floor: x_s",
+                "operator": ">=",
+                "rhs": "demand_floor_fraction * Previous_Quarter_Sales[s]",
+                "used_parameters": [
+                  "Customer_Rating_Avg[s]",
+                  "rating_threshold_for_floor",
+                  "demand_floor_fraction",
+                  "Previous_Quarter_Sales[s]",
+                  "x_s"
+                ],
+                "optional": true,
+                "notes": "If enabled (demand_floor_fraction>0) this enforces minimum production levels for highly-rated products."
+              }
+            ],
+            "integrality_and_scaling_comments": {
+              "integrality": "x_s are integer because SKUs are discrete physical units. For large aggregate volumes or when a fast LP is required, relaxing integrality (treat x_s as continuous) can be acceptable and provide a bound; rounding will be required for implementable solutions.",
+              "scaling": "Numerical scaling is mild here: profit coefficients are currency-per-unit (tens to hundreds), resource usage is minutes-per-unit (roughly 5-90). If solver numerical issues occur, normalize minutes to hours or scale profit to thousands. Also remove zero/negative-profit SKUs before solving (set x_s=0) to reduce problem size. Ensure all parameters are in consistent units (e.g., capacities and demand caps per same planning period)."
+            },
+            "expected_problem_size_and_solver_recommendation": {
+              "n_variables": "len(S) (e.g., 80)",
+              "n_constraints": "2 resource constraints + |S| demand-cap constraints (e.g., 82) + optional supplier constraints (|K|, ~4) + optional floors",
+              "density": "sparse (each constraint touches variables only where coefficients nonzero; resource constraints dense across S)",
+              "expected_solution_time": "Milliseconds to seconds for 80 integer variables with PuLP CBC; seconds if integrality enforced. Very small for LP relaxation.",
+              "solver_recommendation": "PuLP with CBC is suitable for this scale. For larger instances or speed/optimality guarantees, consider Gurobi or CPLEX (commercial). If integrality is relaxed, default LP solvers suffice."
+            },
+            "implementation_notes_for_coding_task": {
+              "CSV_columns_mapped": {
+                "Product_SKU": "index S",
+                "Sale_Price_Per_Unit": "Sale_Price_Per_Unit[s]",
+                "Material_Cost_Per_Unit": "Material_Cost_Per_Unit[s]",
+                "Molding_Mins_Req": "Molding_Mins_Req[s]",
+                "Assembly_Mins_Req": "Assembly_Mins_Req[s]",
+                "Previous_Quarter_Sales": "Previous_Quarter_Sales[s]",
+                "Max_Market_Capacity": "Max_Market_Capacity[s]",
+                "Customer_Rating_Avg": "Customer_Rating_Avg[s]",
+                "Supplier_ID": "Supplier_of_s[s]"
+              },
+              "default_computations": {
+                "molding_capacity_total_minutes": "sum_s Previous_Quarter_Sales[s] * Molding_Mins_Req[s]",
+                "assembly_capacity_total_minutes": "sum_s Previous_Quarter_Sales[s] * Assembly_Mins_Req[s]",
+                "demand_cap_used[s]": "Max_Market_Capacity[s] if use_max_market_capacity_flag else (demand_forecast_cap[s] if provided else Previous_Quarter_Sales[s])",
+                "profit_per_unit[s]": "Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s] - molding_cost_per_min*Molding_Mins_Req[s] - assembly_cost_per_min*Assembly_Mins_Req[s]"
+              },
+              "preprocessing_recommendations": [
+                "Validate that Max_Market_Capacity and Previous_Quarter_Sales use the same time base. If not, set use_max_market_capacity_flag=false and provide demand_forecast_cap or use Previous_Quarter_Sales.",
+                "Remove SKUs with profit_per_unit <= 0 (or set explicit x_s = 0) unless there are non-financial reasons to produce them.",
+                "If integrality_flag==true but some SKUs have very large caps making integer solving heavy, consider solving LP relaxation then rounding only a few SKUs with small fractional values."
+              ]
+            }
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "preprocessing_build_parameters",
+        "status": "ok",
+        "output": {
+          "reasoning": "Provide a self-contained Python preprocessing snippet that loads the CSV, validates and cleans numeric fields, builds the required lists and dictionaries for the MILP model, computes derived parameters (profit_per_unit, default capacities, supplier capacities), and exposes a small CONFIG section where the user can override defaults. The code raises clear errors on missing mandatory fields (or can be configured to fill them), and prints a concise summary and small sample of parameter dicts. The mapping from CSV columns to model parameters is provided below and implemented in the code.",
+          "result": {
+            "column_to_parameter_mapping": {
+              "Product_SKU": "SKU string -> used for the set SKUs (skus list)",
+              "Sale_Price_Per_Unit": "price[s] (float)",
+              "Material_Cost_Per_Unit": "material_cost[s] (float)",
+              "Molding_Mins_Req": "molding_time_per_unit[s] (float, minutes per unit)",
+              "Assembly_Mins_Req": "assembly_time_per_unit[s] (float, minutes per unit)",
+              "Max_Market_Capacity": "demand_cap[s] (float, per planning period)",
+              "Previous_Quarter_Sales": "prev_sales[s] (int/float, historical units)",
+              "Supplier_ID": "supplier_of[s] (string -> supplier id)"
+            },
+            "python_code": "import pandas as pd\nfrom typing import Dict, List, Any, Optional\n\n# ------------------------------------------------------------------\n# CONFIG - user overrides and behavior flags\n# ------------------------------------------------------------------\ncsv_path: str = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv\"  # default path provided\n\n# If numeric_fill_missing == 'error' then missing numeric values raise an exception.\n# If 'fill_zero' missing numeric -> 0. If 'fill_mean' -> fill with column mean.\nnumeric_fill_missing: str = 'error'  # options: 'error', 'fill_zero', 'fill_mean'\n\n# Overrides for total capacities (minutes). If None, defaults are computed from historical usage.\nmolding_capacity_override: Optional[float] = None\nassembly_capacity_override: Optional[float] = None\n\n# If True use Max_Market_Capacity column as demand_cap. If False, use Previous_Quarter_Sales as fallback.\nuse_max_market_capacity_flag: bool = True\n\n# Optional user-supplied supplier_capacity overrides (dict supplier_id -> numeric). If None, computed from history.\nsupplier_capacity_override: Optional[Dict[str, float]] = None\n\n# How many sample SKUs to show in summary\n_SAMPLE_N = 5\n\n# ------------------------------------------------------------------\n# Implementation\n# ------------------------------------------------------------------\n\nREQUIRED_COLS = [\n    'Product_SKU',\n    'Sale_Price_Per_Unit',\n    'Material_Cost_Per_Unit',\n    'Molding_Mins_Req',\n    'Assembly_Mins_Req',\n    'Previous_Quarter_Sales',\n    'Max_Market_Capacity',\n    'Supplier_ID'\n]\n\n\ndef _ensure_columns_exist(df: pd.DataFrame, required_cols: List[str]):\n    missing = [c for c in required_cols if c not in df.columns]\n    if missing:\n        raise KeyError(f\"Missing required columns in CSV: {missing}\")\n\n\ndef _coerce_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:\n    s = pd.to_numeric(df[col], errors='coerce')\n    if s.isna().any():\n        if numeric_fill_missing == 'error':\n            idxs = list(df.index[s.isna()])\n            sample = df.loc[idxs[:5], ['Product_SKU', col]].to_dict(orient='records')\n            raise ValueError(\n                f\"Column '{col}' contains non-numeric or missing values at rows {idxs[:20]}. \"\n                f\"Sample of problematic rows: {sample}. Set numeric_fill_missing to 'fill_zero' or 'fill_mean' to auto-fill.\"\n            )\n        elif numeric_fill_missing == 'fill_zero':\n            s = s.fillna(0.0)\n        elif numeric_fill_missing == 'fill_mean':\n            mean_val = s.mean()\n            s = s.fillna(mean_val)\n        else:\n            raise ValueError(f\"Unknown numeric_fill_missing strategy: {numeric_fill_missing}\")\n    return s\n\n\ndef load_and_prepare(csv_path: str) -> Dict[str, Any]:\n    # Load\n    df = pd.read_csv(csv_path)\n\n    # Basic existence checks\n    _ensure_columns_exist(df, REQUIRED_COLS)\n\n    # Strip whitespace from string columns used as keys\n    df['Product_SKU'] = df['Product_SKU'].astype(str).str.strip()\n    df['Supplier_ID'] = df['Supplier_ID'].astype(str).str.strip()\n\n    # Coerce numeric fields\n    df['Sale_Price_Per_Unit'] = _coerce_numeric_column(df, 'Sale_Price_Per_Unit').astype(float)\n    df['Material_Cost_Per_Unit'] = _coerce_numeric_column(df, 'Material_Cost_Per_Unit').astype(float)\n    df['Molding_Mins_Req'] = _coerce_numeric_column(df, 'Molding_Mins_Req').astype(float)\n    df['Assembly_Mins_Req'] = _coerce_numeric_column(df, 'Assembly_Mins_Req').astype(float)\n    df['Previous_Quarter_Sales'] = _coerce_numeric_column(df, 'Previous_Quarter_Sales').astype(float)\n    df['Max_Market_Capacity'] = _coerce_numeric_column(df, 'Max_Market_Capacity').astype(float)\n\n    # Check SKU uniqueness (if duplicated SKUs are present, warn and aggregate or fail depending on policy)\n    if df['Product_SKU'].duplicated().any():\n        dup = df.loc[df['Product_SKU'].duplicated(keep=False), 'Product_SKU'].unique().tolist()\n        # For this preprocessing we will treat each row as a distinct item; if SKU duplicates exist it's likely the dataset encodes variants.\n        # We'll keep rows as-is but warn the user.\n        print(f\"Warning: duplicate Product_SKU values found for {len(dup)} SKU identifiers. Each row will be treated as a distinct model item. Duplicates: {dup[:10]}{('...' if len(dup)>10 else '')}\")\n\n    # Build SKUs list in the same order as the file\n    skus: List[str] = df['Product_SKU'].astype(str).tolist()\n\n    # Build parameter dicts (SKU -> value)\n    price: Dict[str, float] = dict(zip(skus, df['Sale_Price_Per_Unit'].astype(float).tolist()))\n    material_cost: Dict[str, float] = dict(zip(skus, df['Material_Cost_Per_Unit'].astype(float).tolist()))\n    molding_time: Dict[str, float] = dict(zip(skus, df['Molding_Mins_Req'].astype(float).tolist()))\n    assembly_time: Dict[str, float] = dict(zip(skus, df['Assembly_Mins_Req'].astype(float).tolist()))\n\n    # Demand cap: by default use Max_Market_Capacity if flag true, otherwise Previous_Quarter_Sales\n    if use_max_market_capacity_flag:\n        demand_cap_values = df['Max_Market_Capacity'].astype(float)\n    else:\n        demand_cap_values = df['Previous_Quarter_Sales'].astype(float)\n    demand_cap: Dict[str, float] = dict(zip(skus, demand_cap_values.tolist()))\n\n    prev_sales: Dict[str, float] = dict(zip(skus, df['Previous_Quarter_Sales'].astype(float).tolist()))\n    supplier_of: Dict[str, str] = dict(zip(skus, df['Supplier_ID'].astype(str).tolist()))\n\n    # Derived: profit per unit (simple version: price - material cost)\n    profit_per_unit: Dict[str, float] = {}\n    for s in skus:\n        profit_per_unit[s] = float(price[s] - material_cost[s])\n\n    # Default total capacities (minutes) using formula: sum(prev_sales * time_per_unit)\n    total_molding_capacity_default = float((df['Previous_Quarter_Sales'] * df['Molding_Mins_Req']).sum())\n    total_assembly_capacity_default = float((df['Previous_Quarter_Sales'] * df['Assembly_Mins_Req']).sum())\n\n    # Apply overrides if provided\n    total_molding_capacity = float(molding_capacity_override) if molding_capacity_override is not None else total_molding_capacity_default\n    total_assembly_capacity = float(assembly_capacity_override) if assembly_capacity_override is not None else total_assembly_capacity_default\n\n    # Supplier capacities: default = sum(prev_sales for SKUs of that supplier)\n    supplier_capacity_series = df.groupby('Supplier_ID')['Previous_Quarter_Sales'].sum()\n    supplier_capacity: Dict[str, float] = supplier_capacity_series.astype(float).to_dict()\n    # apply supplier overrides if provided\n    if supplier_capacity_override is not None:\n        for k, v in supplier_capacity_override.items():\n            supplier_capacity[str(k)] = float(v)\n\n    # Final model-parameter dict to return (suitable to feed into PuLP)\n    model_params = {\n        'skus': skus,\n        'price': price,\n        'material_cost': material_cost,\n        'molding_time': molding_time,\n        'assembly_time': assembly_time,\n        'demand_cap': demand_cap,\n        'prev_sales': prev_sales,\n        'supplier_of': supplier_of,\n        'profit_per_unit': profit_per_unit,\n        'total_molding_capacity': total_molding_capacity,\n        'total_assembly_capacity': total_assembly_capacity,\n        'supplier_capacity': supplier_capacity,\n        # extras for traceability\n        '_internal': {\n            'total_molding_capacity_default': total_molding_capacity_default,\n            'total_assembly_capacity_default': total_assembly_capacity_default,\n            'use_max_market_capacity_flag': use_max_market_capacity_flag,\n            'numeric_fill_missing': numeric_fill_missing,\n            'row_count': len(df)\n        }\n    }\n\n    # Print summary\n    print('\\n--- Preprocessing summary ---')\n    print(f\"Rows read: {len(df)}\")\n    print(f\"Number of SKUs (items): {len(skus)}\")\n    print(f\"Total default molding capacity (minutes) computed from history: {total_molding_capacity_default:.2f}\")\n    print(f\"Total default assembly capacity (minutes) computed from history: {total_assembly_capacity_default:.2f}\")\n    if molding_capacity_override is not None:\n        print(f\"Molding capacity override applied: {total_molding_capacity:.2f}\")\n    if assembly_capacity_override is not None:\n        print(f\"Assembly capacity override applied: {total_assembly_capacity:.2f}\")\n    print(f\"Number of suppliers (unique): {df['Supplier_ID'].nunique()}\")\n\n    # Show a small sample of parameter dicts\n    sample_skus = skus[:_SAMPLE_N]\n    print('\\nSample (first {} SKUs):'.format(len(sample_skus)))\n    for s in sample_skus:\n        print(f\" SKU: {s} | price={price[s]:.2f} | mat_cost={material_cost[s]:.2f} | profit={profit_per_unit[s]:.2f} | molding_min={molding_time[s]:.2f} | assembly_min={assembly_time[s]:.2f} | demand_cap={demand_cap[s]:.1f} | prev_sales={prev_sales[s]:.1f} | supplier={supplier_of[s]}\")\n\n    print('\\nSample supplier capacities (up to 5):')\n    for k, v in list(supplier_capacity.items())[:5]:\n        print(f\" supplier: {k} -> capacity (default historical) = {v:.1f}\")\n\n    print('--- End summary ---\\n')\n\n    # Also assign to top-level names for interactive use (optional)\n    globals().update(model_params)\n\n    return model_params\n\n\n# If the script is executed directly, run the loader and produce model_params\nif __name__ == '__main__':\n    params = load_and_prepare(csv_path)\n    # params now contains the required dicts for the MILP: skus, price, material_cost, molding_time,\n    # assembly_time, demand_cap, prev_sales, supplier_of, profit_per_unit, total_molding_capacity,\n    # total_assembly_capacity, supplier_capacity\n"
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "coding_pulp_solver",
+        "status": "ok",
+        "output": {
+          "reasoning": "I will provide a single, self-contained Python script that includes the preprocessing snippet to load and validate the CSV, builds model parameters, constructs a PuLP integer linear program maximizing total profit, optionally applies supplier capacity constraints, solves using PuLP's default solver, and prints a clear summary plus a CSV-style listing of SKU results. The script includes configuration flags for overriding capacities and toggling supplier constraints, and a short comment explaining how to switch solvers. It is robust to small data issues (coerces numeric columns, handles fractional caps by flooring to integer units for integrality), and prints helpful warnings if problems are detected.",
+          "result": {
+            "code": "\"\"\"\nProduct-mix MILP solver using PuLP.\n- Loads CSV at configured path\n- Preprocesses and validates columns\n- Builds MILP to maximize contribution margin (price - material cost)\n- Respects molding and assembly capacity (defaults from history or overrides)\n- Optionally enforces supplier aggregate capacities\n- Prints solver status, objective value, and decision variable values\n\nThis script is self-contained. Edit the CONFIG section below to change behavior.\n\"\"\"\n\nimport re\nimport math\nimport sys\nfrom typing import Dict, List, Any, Optional\nimport numpy as np\nimport pandas as pd\nimport pulp\n\n# ------------------------------------------------------------------\n# CONFIG - user overrides and behavior flags\n# ------------------------------------------------------------------\n# CSV path (provided)\nCSV_PATH: str = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv\"\n\n# Numeric missing value handling: 'error', 'fill_zero', 'fill_mean'\nnumeric_fill_missing: str = 'error'\n\n# If True use Max_Market_Capacity column as demand_cap. If False, use Previous_Quarter_Sales as fallback.\nuse_max_market_capacity_flag: bool = True\n\n# Overrides for total capacities (minutes). If None, defaults are computed from historical usage.\nmolding_capacity_override: Optional[float] = None\nassembly_capacity_override: Optional[float] = None\n\n# Optional supplier capacity constraints: set to True to enable them. Default False.\nAPPLY_SUPPLIER_CAPACITY: bool = False\n# If enabled, you can also supply a dict override mapping supplier_id -> capacity (units)\nsupplier_capacity_override: Optional[Dict[str, float]] = None\n\n# Integrality: if True variables are Integer. If False they are Continuous (LP relaxation)\nINTEGRAL_VARS: bool = True\n\n# Solver selection: None uses default pulp solver (CBC). To pass a solver instance, set below.\nPULP_SOLVER = None\n\n# How many sample SKUs to show in preprocessing summary\n_SAMPLE_N = 5\n\n# ------------------------------------------------------------------\n# Constants / required columns\n# ------------------------------------------------------------------\nREQUIRED_COLS = [\n    'Product_SKU',\n    'Sale_Price_Per_Unit',\n    'Material_Cost_Per_Unit',\n    'Molding_Mins_Req',\n    'Assembly_Mins_Req',\n    'Previous_Quarter_Sales',\n    'Max_Market_Capacity',\n    'Supplier_ID'\n]\n\n# ------------------------------------------------------------------\n# Helper utilities\n# ------------------------------------------------------------------\n\ndef safe_name(s: Any, max_len: int = 64) -> str:\n    \"\"\"Return a sanitized identifier suitable for variable/constraint names.\n    Keeps alphanumeric and underscores, replaces others with '_', truncates to max_len.\n    Ensures the first character is a letter or underscore by prefixing 'v_' if needed.\n    \"\"\"\n    s_str = str(s)\n    name = re.sub(r'[^0-9a-zA-Z_]', '_', s_str)\n    if len(name) > max_len:\n        name = name[:max_len]\n    if not re.match(r'^[A-Za-z_]', name):\n        name = 'v_' + name\n    return name\n\n\ndef _ensure_columns_exist(df: pd.DataFrame, required_cols: List[str]):\n    missing = [c for c in required_cols if c not in df.columns]\n    if missing:\n        raise KeyError(f\"Missing required columns in CSV: {missing}\")\n\n\ndef _coerce_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:\n    s = pd.to_numeric(df[col], errors='coerce')\n    if s.isna().any():\n        if numeric_fill_missing == 'error':\n            idxs = list(df.index[s.isna()])\n            sample = df.loc[idxs[:5], ['Product_SKU', col]].to_dict(orient='records')\n            raise ValueError(\n                f\"Column '{col}' contains non-numeric or missing values at rows {idxs[:20]}. \"\n                f\"Sample of problematic rows: {sample}. Set numeric_fill_missing to 'fill_zero' or 'fill_mean' to auto-fill.\"\n            )\n        elif numeric_fill_missing == 'fill_zero':\n            s = s.fillna(0.0)\n        elif numeric_fill_missing == 'fill_mean':\n            mean_val = s.mean()\n            s = s.fillna(mean_val)\n        else:\n            raise ValueError(f\"Unknown numeric_fill_missing strategy: {numeric_fill_missing}\")\n    # Validate finite\n    if not np.isfinite(s).all():\n        bad_idx = df.index[~np.isfinite(s)].tolist()\n        raise ValueError(f\"Column '{col}' contains non-finite values at rows {bad_idx[:20]}\")\n    return s\n\n# ------------------------------------------------------------------\n# Preprocessing: load CSV, validate, build model parameters\n# ------------------------------------------------------------------\n\ndef load_and_prepare(csv_path: str) -> Dict[str, Any]:\n    df = pd.read_csv(csv_path)\n\n    _ensure_columns_exist(df, REQUIRED_COLS)\n\n    # Strip whitespace and ensure strings\n    df['Product_SKU'] = df['Product_SKU'].astype(str).str.strip()\n    df['Supplier_ID'] = df['Supplier_ID'].astype(str).str.strip()\n\n    # Coerce numeric fields\n    df['Sale_Price_Per_Unit'] = _coerce_numeric_column(df, 'Sale_Price_Per_Unit').astype(float)\n    df['Material_Cost_Per_Unit'] = _coerce_numeric_column(df, 'Material_Cost_Per_Unit').astype(float)\n    df['Molding_Mins_Req'] = _coerce_numeric_column(df, 'Molding_Mins_Req').astype(float)\n    df['Assembly_Mins_Req'] = _coerce_numeric_column(df, 'Assembly_Mins_Req').astype(float)\n    df['Previous_Quarter_Sales'] = _coerce_numeric_column(df, 'Previous_Quarter_Sales').astype(float)\n    df['Max_Market_Capacity'] = _coerce_numeric_column(df, 'Max_Market_Capacity').astype(float)\n\n    # Use the DataFrame row index to create unique item identifiers so duplicate Product_SKU rows are treated separately\n    df = df.reset_index(drop=False).rename(columns={'index': 'row_index'})\n    # item_id uses row index to be unique: <Product_SKU>__r<row_index>\n    df['item_id'] = df.apply(lambda r: f\"{r['Product_SKU']}__r{int(r['row_index'])}\", axis=1)\n\n    # Prepare lists and dicts\n    item_ids: List[str] = df['item_id'].astype(str).tolist()\n    if len(item_ids) == 0:\n        raise ValueError('No SKUs found in CSV; exiting.')\n\n    # Mapping from item_id back to original Product_SKU for reporting\n    original_sku: Dict[str, str] = dict(zip(item_ids, df['Product_SKU'].astype(str).tolist()))\n\n    price: Dict[str, float] = dict(zip(item_ids, df['Sale_Price_Per_Unit'].astype(float).tolist()))\n    material_cost: Dict[str, float] = dict(zip(item_ids, df['Material_Cost_Per_Unit'].astype(float).tolist()))\n    molding_time: Dict[str, float] = dict(zip(item_ids, df['Molding_Mins_Req'].astype(float).tolist()))\n    assembly_time: Dict[str, float] = dict(zip(item_ids, df['Assembly_Mins_Req'].astype(float).tolist()))\n\n    if use_max_market_capacity_flag:\n        demand_cap_values = df['Max_Market_Capacity'].astype(float)\n    else:\n        demand_cap_values = df['Previous_Quarter_Sales'].astype(float)\n    demand_cap: Dict[str, float] = dict(zip(item_ids, demand_cap_values.tolist()))\n\n    prev_sales: Dict[str, float] = dict(zip(item_ids, df['Previous_Quarter_Sales'].astype(float).tolist()))\n    supplier_of: Dict[str, str] = dict(zip(item_ids, df['Supplier_ID'].astype(str).tolist()))\n\n    # Derived: profit per unit (price - material cost). Users can add per-minute labor cost later if desired.\n    profit_per_unit: Dict[str, float] = {}\n    for i in item_ids:\n        profit_per_unit[i] = float(price[i] - material_cost[i])\n\n    # Default total capacities (minutes) using formula: sum(prev_sales * time_per_unit)\n    total_molding_capacity_default = float((df['Previous_Quarter_Sales'] * df['Molding_Mins_Req']).sum())\n    total_assembly_capacity_default = float((df['Previous_Quarter_Sales'] * df['Assembly_Mins_Req']).sum())\n\n    # Apply overrides if provided (validate non-negative)\n    if molding_capacity_override is not None:\n        if not np.isfinite(molding_capacity_override) or molding_capacity_override < 0:\n            raise ValueError('molding_capacity_override must be a non-negative finite number or None')\n        total_molding_capacity = float(molding_capacity_override)\n    else:\n        total_molding_capacity = total_molding_capacity_default\n\n    if assembly_capacity_override is not None:\n        if not np.isfinite(assembly_capacity_override) or assembly_capacity_override < 0:\n            raise ValueError('assembly_capacity_override must be a non-negative finite number or None')\n        total_assembly_capacity = float(assembly_capacity_override)\n    else:\n        total_assembly_capacity = total_assembly_capacity_default\n\n    # Supplier capacities default: sum(prev_sales) per supplier\n    supplier_capacity_series = df.groupby('Supplier_ID')['Previous_Quarter_Sales'].sum()\n    supplier_capacity: Dict[str, float] = supplier_capacity_series.astype(float).to_dict()\n    if supplier_capacity_override is not None:\n        for k, v in supplier_capacity_override.items():\n            if not np.isfinite(v) or v < 0:\n                raise ValueError('supplier_capacity_override values must be non-negative finite')\n            supplier_capacity[str(k)] = float(v)\n\n    # Validate demand caps are finite; if not, coerce to zero with a warning\n    for i in item_ids:\n        cap = demand_cap.get(i, 0.0)\n        if not np.isfinite(cap) or cap < 0:\n            print(f\"Warning: demand cap for item {i} (SKU {original_sku[i]}) is invalid ({cap}); setting to 0.\")\n            demand_cap[i] = 0.0\n\n    # Final model-parameter dict to return\n    model_params = {\n        'item_ids': item_ids,\n        'original_sku': original_sku,\n        'price': price,\n        'material_cost': material_cost,\n        'molding_time': molding_time,\n        'assembly_time': assembly_time,\n        'demand_cap': demand_cap,\n        'prev_sales': prev_sales,\n        'supplier_of': supplier_of,\n        'profit_per_unit': profit_per_unit,\n        'total_molding_capacity': total_molding_capacity,\n        'total_assembly_capacity': total_assembly_capacity,\n        'supplier_capacity': supplier_capacity,\n        '_internal': {\n            'total_molding_capacity_default': total_molding_capacity_default,\n            'total_assembly_capacity_default': total_assembly_capacity_default,\n            'use_max_market_capacity_flag': use_max_market_capacity_flag,\n            'numeric_fill_missing': numeric_fill_missing,\n            'row_count': len(df)\n        }\n    }\n\n    # Print preprocessing summary\n    print('\\n--- Preprocessing summary ---')\n    print(f\"Rows read: {len(df)}\")\n    print(f\"Number of model items (rows treated as distinct): {len(item_ids)}\")\n    print(f\"Total default molding capacity (minutes) computed from history: {total_molding_capacity_default:.2f}\")\n    print(f\"Total default assembly capacity (minutes) computed from history: {total_assembly_capacity_default:.2f}\")\n    if molding_capacity_override is not None:\n        print(f\"Molding capacity override applied: {total_molding_capacity:.2f}\")\n    if assembly_capacity_override is not None:\n        print(f\"Assembly capacity override applied: {total_assembly_capacity:.2f}\")\n    print(f\"Number of suppliers (unique): {df['Supplier_ID'].nunique()}\")\n\n    sample_items = item_ids[:_SAMPLE_N]\n    print('\\nSample (first {} items):'.format(len(sample_items)))\n    for itm in sample_items:\n        print(f\" item_id: {itm} | SKU={original_sku[itm]} | price={price[itm]:.2f} | mat_cost={material_cost[itm]:.2f} | profit={profit_per_unit[itm]:.2f} | molding_min={molding_time[itm]:.2f} | assembly_min={assembly_time[itm]:.2f} | demand_cap={demand_cap[itm]:.1f} | prev_sales={prev_sales[itm]:.1f} | supplier={supplier_of[itm]}\")\n\n    print('\\nSample supplier capacities (up to 5):')\n    for k, v in list(supplier_capacity.items())[:5]:\n        print(f\" supplier: {k} -> capacity (default historical) = {v:.1f}\")\n\n    print('--- End summary ---\\n')\n\n    return model_params\n\n# ------------------------------------------------------------------\n# Build and solve MILP using PuLP\n# ------------------------------------------------------------------\n\ndef build_and_solve(params: Dict[str, Any]) -> Dict[str, Any]:\n    item_ids: List[str] = params['item_ids']\n    original_sku: Dict[str, str] = params['original_sku']\n    price: Dict[str, float] = params['price']\n    material_cost: Dict[str, float] = params['material_cost']\n    molding_time: Dict[str, float] = params['molding_time']\n    assembly_time: Dict[str, float] = params['assembly_time']\n    demand_cap: Dict[str, float] = params['demand_cap']\n    profit_per_unit: Dict[str, float] = params['profit_per_unit']\n    total_molding_capacity: float = params['total_molding_capacity']\n    total_assembly_capacity: float = params['total_assembly_capacity']\n    supplier_of: Dict[str, str] = params['supplier_of']\n    supplier_capacity: Dict[str, float] = params['supplier_capacity']\n\n    # Create the problem (maximize total profit)\n    prob = pulp.LpProblem('Product_Mix_MaxProfit', pulp.LpMaximize)\n\n    # Decision variables: integer or continuous non-negative units for each item\n    x_vars: Dict[str, pulp.LpVariable] = {}\n    used_safe_names = set()\n    for s in item_ids:\n        ub_raw = float(demand_cap.get(s, 0.0))\n        # Handle non-finite or negative values\n        if not np.isfinite(ub_raw) or ub_raw <= 0:\n            ub_int = 0\n        else:\n            # Choose to floor fractional caps to respect integrality\n            ub_int = max(0, int(math.floor(ub_raw + 1e-9)))\n            if abs(ub_raw - ub_int) > 1e-6:\n                print(f\"Note: demand cap for item '{s}' (SKU {original_sku[s]}) is fractional ({ub_raw}); using floored integer upper bound {ub_int} to respect integrality.\")\n        # Build a unique safe variable name\n        base_safe = safe_name(s, max_len=48)\n        safe = base_safe\n        counter = 1\n        while safe in used_safe_names:\n            safe = f\"{base_safe}_{counter}\"\n            counter += 1\n        used_safe_names.add(safe)\n\n        var_name = f\"x_{safe}\"\n        category = 'Integer' if INTEGRAL_VARS else 'Continuous'\n        # Create variable with integer upper bound ub_int (0 allowed)\n        x_vars[s] = pulp.LpVariable(var_name, lowBound=0, upBound=ub_int, cat=category)\n\n    # Objective: maximize sum profit_per_unit[s] * x[s]\n    prob += pulp.lpSum([profit_per_unit[s] * x_vars[s] for s in item_ids]), 'Total_Profit'\n\n    # Molding capacity constraint\n    if not np.isfinite(total_molding_capacity) or total_molding_capacity < 0:\n        raise ValueError('Computed total_molding_capacity must be finite and >= 0')\n    prob += pulp.lpSum([molding_time[s] * x_vars[s] for s in item_ids]) <= float(total_molding_capacity), 'Molding_Capacity'\n\n    # Assembly capacity constraint\n    if not np.isfinite(total_assembly_capacity) or total_assembly_capacity < 0:\n        raise ValueError('Computed total_assembly_capacity must be finite and >= 0')\n    prob += pulp.lpSum([assembly_time[s] * x_vars[s] for s in item_ids]) <= float(total_assembly_capacity), 'Assembly_Capacity'\n\n    # Per-item demand caps already enforced by variable upper bounds\n\n    # Optional: supplier capacity aggregation\n    if APPLY_SUPPLIER_CAPACITY:\n        supplier_to_items: Dict[str, List[str]] = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n\n        for sup, s_list in supplier_to_items.items():\n            sup_cap_raw = supplier_capacity.get(sup, 0.0)\n            if not np.isfinite(sup_cap_raw) or sup_cap_raw <= 0:\n                sup_cap_int = 0\n            else:\n                sup_cap_int = max(0, int(math.floor(float(sup_cap_raw) + 1e-9)))\n                if abs(sup_cap_raw - sup_cap_int) > 1e-6:\n                    print(f\"Note: supplier capacity for '{sup}' is fractional ({sup_cap_raw}); using floored integer {sup_cap_int}.\")\n            cname = f\"SupplierCap_{safe_name(sup, max_len=48)}\"\n            prob += pulp.lpSum([x_vars[s] for s in s_list]) <= sup_cap_int, cname\n\n    # Solve\n    if PULP_SOLVER is None:\n        res = prob.solve()\n    else:\n        res = prob.solve(PULP_SOLVER)\n\n    status_str = pulp.LpStatus.get(prob.status, 'UNKNOWN')\n    print(f\"\\nSolver status: {status_str} (internal code {prob.status})\")\n\n    # Extract solution values\n    produced: Dict[str, int] = {}\n    for s in item_ids:\n        val = pulp.value(x_vars[s])\n        if val is None:\n            val_num = 0\n        else:\n            # Round to nearest integer (should already be integer if integrality enforced)\n            val_num = int(round(float(val)))\n        produced[s] = val_num\n\n    total_profit = float(pulp.value(prob.objective) if pulp.value(prob.objective) is not None else 0.0)\n    total_units = sum(produced.values())\n    used_molding = sum(molding_time[s] * produced[s] for s in item_ids)\n    used_assembly = sum(assembly_time[s] * produced[s] for s in item_ids)\n\n    molding_util_pct = (used_molding / total_molding_capacity * 100.0) if total_molding_capacity > 0 else float('nan')\n    assembly_util_pct = (used_assembly / total_assembly_capacity * 100.0) if total_assembly_capacity > 0 else float('nan')\n\n    # Print summary with required outputs\n    print('\\n--- Optimization results summary ---')\n    print(f\"Total profit (objective): {total_profit:.2f}\")\n    print(f\"Total units produced: {total_units}\")\n    print(f\"Molding used: {used_molding:.2f} / {total_molding_capacity:.2f} minutes ({molding_util_pct:.1f}%)\")\n    print(f\"Assembly used: {used_assembly:.2f} / {total_assembly_capacity:.2f} minutes ({assembly_util_pct:.1f}%)\")\n    print(f\"Integrality enforced: {INTEGRAL_VARS}\")\n    if APPLY_SUPPLIER_CAPACITY:\n        print('Supplier capacities were enforced.')\n    else:\n        print('Supplier capacities were NOT enforced (APPLY_SUPPLIER_CAPACITY=False).')\n\n    # Print solver full status and objective\n    print('\\nDecision variables (item_id, original_SKU, produced_units, profit_per_unit, demand_cap):')\n    print('item_id,original_SKU,produced_units,profit_per_unit,demand_cap')\n    for s in item_ids:\n        cap = float(demand_cap.get(s, 0.0))\n        pct = (produced[s] / cap * 100.0) if cap > 0 else 0.0\n        print(f\"{s},{original_sku[s]},{produced[s]},{profit_per_unit.get(s,0.0):.2f},{cap:.1f} (fulfilled {pct:.1f}%)\")\n\n    # If supplier capacities were enforced, print summary\n    if APPLY_SUPPLIER_CAPACITY:\n        print('\\nSupplier,capacity,units_assigned,percent_utilized')\n        supplier_to_items = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n        for sup, s_list in supplier_to_items.items():\n            cap_raw = supplier_capacity.get(sup, 0.0)\n            assigned = sum(produced[s] for s in s_list)\n            cap_int = max(0, int(math.floor(float(cap_raw) + 1e-9))) if np.isfinite(cap_raw) else 0\n            pct = (assigned / cap_int * 100.0) if cap_int > 0 else 0.0\n            print(f\"{sup},{cap_int},{assigned},{pct:.1f}\")\n\n    print('\\n--- End of results ---')\n\n    return {\n        'status': status_str,\n        'total_profit': total_profit,\n        'total_units': total_units,\n        'used_molding': used_molding,\n        'used_assembly': used_assembly,\n        'produced': produced,\n        'params_snapshot': {\n            'total_molding_capacity': total_molding_capacity,\n            'total_assembly_capacity': total_assembly_capacity,\n            'integral_vars': INTEGRAL_VARS,\n            'apply_supplier_capacity': APPLY_SUPPLIER_CAPACITY\n        }\n    }\n\n# ------------------------------------------------------------------\n# Main execution\n# ------------------------------------------------------------------\nif __name__ == '__main__':\n    try:\n        params = load_and_prepare(CSV_PATH)\n    except Exception as e:\n        print(f\"Error during preprocessing: {e}\")\n        sys.exit(1)\n\n    try:\n        results = build_and_solve(params)\n    except Exception as e:\n        print(f\"Error during model building/solving: {e}\")\n        sys.exit(1)\n\n    # Script ends here. Results already printed.\n",
+            "output_schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "total_profit": {
+                  "type": "number"
+                },
+                "total_units": {
+                  "type": "integer"
+                },
+                "used_molding": {
+                  "type": "number"
+                },
+                "used_assembly": {
+                  "type": "number"
+                },
+                "produced": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "status",
+                "total_profit",
+                "produced"
+              ]
+            },
+            "successful_implementation": true
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "validation_syntax_and_smoke",
+        "status": "ok",
+        "output": {
+          "reasoning": "I performed a static review of the provided Python script (the output from 'coding_pulp_solver'). I ran a syntax check (no syntax errors). I verified the presence and use of expected imports and PuLP calls, checked that names produced in preprocessing are used consistently in the solver-building function, and identified several logical/runtime risks (most importantly: duplicate Product_SKU rows are warned but in practice collapsed by use of SKU strings as dict keys). I list actionable defensive checks and small fixes to make the script more robust and correct.",
+          "result": {
+            "syntax_check": {
+              "result": "pass",
+              "notes": [
+                "validate_python_syntax returned OK \u2014 no syntax errors found.",
+                "All top-level imports (pandas, math, sys, typing, pulp) are present."
+              ]
+            },
+            "name_consistency": {
+              "result": "fail",
+              "notes": [
+                "Most variable and function names are consistent between preprocessing and solver (e.g., 'skus', 'price', 'material_cost', 'molding_time', 'assembly_time', 'demand_cap', 'profit_per_unit', 'supplier_of', 'supplier_capacity').",
+                "Critical logical inconsistency: the code warns about duplicate Product_SKU values and claims 'Each row will be treated as a distinct model item', but the implementation uses the SKU string as the dictionary key for price, material_cost, demand_cap, etc. That collapses duplicate SKUs (last occurrence wins) rather than treating rows distinctly. This is a correctness bug.",
+                "All other referenced variables (numeric_fill_missing, use_max_market_capacity_flag, molding_capacity_override, assembly_capacity_override, APPLY_SUPPLIER_CAPACITY, supplier_capacity_override, PULP_SOLVER, _SAMPLE_N) are defined in the CONFIG section and are in-scope where used."
+              ]
+            },
+            "pulp_api_usage": {
+              "result": "pass",
+              "notes": [
+                "Correctly constructs the problem: pulp.LpProblem('Product_Mix_MaxProfit', pulp.LpMaximize).",
+                "Decision variables created with pulp.LpVariable(..., cat='Integer') \u2014 valid. (Note: the code does not use LpVariable.dicts, but that is not required.)",
+                "Objective is created with pulp.lpSum([...]) \u2014 correct usage.",
+                "Constraints are added using pulp.lpSum([...]) and comparison operators \u2014 correct.",
+                "Solver is invoked via prob.solve() or prob.solve(PULP_SOLVER) \u2014 valid. PULP_SOLVER is provided as config to allow custom solver instances (e.g., pulp.PULP_CBC_CMD()).",
+                "Status extraction uses pulp.LpStatus.get(prob.status, 'UNKNOWN') \u2014 LpStatus is a dict in PuLP and .get is valid.",
+                "Solution access uses pulp.value(var) and pulp.value(prob.objective) \u2014 correct.",
+                "Minor note: the script defines solve_result but never uses it; harmless but noisy."
+              ]
+            },
+            "runtime_risks": [
+              "Duplicate SKUs collapse: If the CSV contains duplicate Product_SKU strings, the code warns but then builds dicts keyed by SKU strings (dict(zip(skus, ...))). This overwrites earlier rows with the same SKU and the solver will not treat duplicate rows as distinct items. This is likely a logic bug and will lead to incorrect modeling when duplicate SKUs are present.",
+              "NaN / Inf in numeric columns: If demand caps or other numeric fields contain NaN or Inf, attempts to float() and math.floor(float(ub_raw)) may raise ValueError or produce unexpected behavior. The code checks only for None, not for NaN/Inf, when preparing ub_raw.",
+              "Fractional caps handling: the script floors fractional demand/supplier caps to integers without explicit user confirmation (it prints a note). This may be acceptable but should be documented or made configurable.",
+              "Variable/constraint names containing unsafe characters: SKU and Supplier_ID values are used verbatim inside variable names and constraint names (f\"x_{s}\", f\"SupplierCap_{sup}\"). If SKUs or supplier IDs contain spaces, commas, slashes, parentheses, leading digits, or other special characters, some solvers or internal PuLP processing may produce unexpected names or warnings. Extremely long names can also cause solver name-length limits to be exceeded.",
+              "Negative or NaN capacities: If total_molding_capacity or total_assembly_capacity are negative (due to overrides or bad input), constraints like sum(times * x) <= negative_value may make the model infeasible. There is no explicit check enforcing non-negative capacities.",
+              "Division-by-zero / percent calculations: The code handles per-SKU demand percentage by checking cap>0 before dividing, which avoids division by zero. For molding/assembly utilization, the code checks total capacity > 0; if capacity is 0 it returns NaN; that behavior may be OK but could be made clearer to the user.",
+              "math.floor on np.nan: If ub_raw is NaN, math.floor(float(ub_raw)) will raise a ValueError. The code only guards against None; it does not guard against NaN.",
+              "KeyErrors in printing: Price/material_cost/profit lookups in summary assume keys exist in dicts. With the current dict construction this is okay for unique SKUs, but if any mismatch occurs (e.g., if later code changes or mapping is built differently) KeyError risk exists.",
+              "Constraint naming collisions: If two suppliers have identical sanitized names or if supplier names include characters that create identical strings after sanitization, constraint names could collide (f\"SupplierCap_{sup}\"). This can silently replace earlier constraints or cause solver errors.",
+              "Empty input: If the CSV has zero rows, skus will be empty and several computations (min, sums, dict zips) will work but solving an empty model might be meaningless; there is no early check to exit with a clear message."
+            ],
+            "suggested_fixes": [
+              "Fix duplicate-SKU handling: if CSV rows should be treated as distinct items even when Product_SKU strings repeat, build per-row unique IDs (for example, use the DataFrame index or append a row counter) and use those unique IDs as keys in parameter dicts and variable names. Example: row_id = f\"{sku}__r{idx}\" or use df.reset_index() and include the index in keys.",
+              "Sanitize names used in variable and constraint names: create a small helper to produce safe identifiers, e.g.:\n  import re\n  def safe_name(s):\n      return re.sub(r'[^0-9a-zA-Z_]', '_', str(s))[:64]\n  and then use pulp.LpVariable(f\"x_{safe_name(s)}\", ...). Also use safe_name(supplier) when building constraint names to avoid illegal characters and length issues.",
+              "Validate numeric inputs early and fail fast with clear messages: after coercion, check demand_cap, molding_time, assembly_time, supplier_capacity for finite numbers and non-negative values. Example checks:\n  if not math.isfinite(val) or val < 0: raise ValueError(...)\n  or optionally coerce negatives to 0 with a clear warning.",
+              "Guard math.floor on NaN/Inf and handle them explicitly: before ub_int = int(math.floor(float(ub_raw) + 1e-9)), check:\n  if not math.isfinite(float(ub_raw)): ub_raw = 0.0  # or raise an error\n  then floor safely.",
+              "If fractional caps should be rounded differently, expose a config option (floor vs ceil vs round) instead of silently flooring. At minimum, document the current behavior clearly.",
+              "Detect and handle empty SKU list early: if not skus: print('No SKUs found in CSV; exiting') and return/exit with non-zero code to avoid building a meaningless model.",
+              "Check capacities are non-negative and warn/raise on negative overrides: if molding_capacity_override is not None and molding_capacity_override < 0: raise ValueError('Molding capacity override must be >= 0'). Same for assembly and supplier_capacity_override values.",
+              "Avoid using SKU strings directly as dict keys if duplicates should be distinct: use unique row keys as noted above. If SKUs are truly unique identifiers, consider enforcing uniqueness at preprocessing and raising an error if duplicates are found.",
+              "Consider using pulp.LpVariable.dicts or tracking mapping from a sanitized name back to original SKU to simplify variable creation and keep original SKU values for reporting. Example pattern:\n  safe_ids = {s: safe_name(s) for s in skus}\n  x_vars = {s: pulp.LpVariable(f\"x_{safe_ids[s]}\", lowBound=0, upBound=ub_int, cat='Integer') for s in skus}\n  This keeps mapping between original SKUs and variables.",
+              "Optional improvement: use pulp.LpStatus[prob.status] (indexing) or keep the current pulp.LpStatus.get(...) \u2014 both are fine. You might prefer pulp.LpStatus[prob.status] which will KeyError if a new unknown status appears (explicit failure), or keep get(...) with a default.",
+              "Make solver return handling clearer: the variable solve_result is unused; consider checking its value or removing it, and provide a clearer error path if the solver fails (raise exception or return explicit error status).",
+              "Add a small validation summary printed before solving listing any automatic fixes applied (e.g., number of NaNs filled, fractionals floored, supplier capacities overridden) so users understand changes made to inputs."
+            ]
+          }
+        },
+        "error": null
+      }
+    ],
+    "final_code": "\"\"\"\nProduct-mix MILP solver using PuLP.\n- Loads CSV at configured path\n- Preprocesses and validates columns\n- Builds MILP to maximize contribution margin (price - material cost)\n- Respects molding and assembly capacity (defaults from history or overrides)\n- Optionally enforces supplier aggregate capacities\n- Prints solver status, objective value, and decision variable values\n\nThis script is self-contained. Edit the CONFIG section below to change behavior.\n\"\"\"\n\nimport re\nimport math\nimport sys\nfrom typing import Dict, List, Any, Optional\nimport numpy as np\nimport pandas as pd\nimport pulp\n\n# ------------------------------------------------------------------\n# CONFIG - user overrides and behavior flags\n# ------------------------------------------------------------------\n# CSV path (provided)\nCSV_PATH: str = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv\"\n\n# Numeric missing value handling: 'error', 'fill_zero', 'fill_mean'\nnumeric_fill_missing: str = 'error'\n\n# If True use Max_Market_Capacity column as demand_cap. If False, use Previous_Quarter_Sales as fallback.\nuse_max_market_capacity_flag: bool = True\n\n# Overrides for total capacities (minutes). If None, defaults are computed from historical usage.\nmolding_capacity_override: Optional[float] = None\nassembly_capacity_override: Optional[float] = None\n\n# Optional supplier capacity constraints: set to True to enable them. Default False.\nAPPLY_SUPPLIER_CAPACITY: bool = False\n# If enabled, you can also supply a dict override mapping supplier_id -> capacity (units)\nsupplier_capacity_override: Optional[Dict[str, float]] = None\n\n# Integrality: if True variables are Integer. If False they are Continuous (LP relaxation)\nINTEGRAL_VARS: bool = True\n\n# Solver selection: None uses default pulp solver (CBC). To pass a solver instance, set below.\nPULP_SOLVER = None\n\n# How many sample SKUs to show in preprocessing summary\n_SAMPLE_N = 5\n\n# ------------------------------------------------------------------\n# Constants / required columns\n# ------------------------------------------------------------------\nREQUIRED_COLS = [\n    'Product_SKU',\n    'Sale_Price_Per_Unit',\n    'Material_Cost_Per_Unit',\n    'Molding_Mins_Req',\n    'Assembly_Mins_Req',\n    'Previous_Quarter_Sales',\n    'Max_Market_Capacity',\n    'Supplier_ID'\n]\n\n# ------------------------------------------------------------------\n# Helper utilities\n# ------------------------------------------------------------------\n\ndef safe_name(s: Any, max_len: int = 64) -> str:\n    \"\"\"Return a sanitized identifier suitable for variable/constraint names.\n    Keeps alphanumeric and underscores, replaces others with '_', truncates to max_len.\n    Ensures the first character is a letter or underscore by prefixing 'v_' if needed.\n    \"\"\"\n    s_str = str(s)\n    name = re.sub(r'[^0-9a-zA-Z_]', '_', s_str)\n    if len(name) > max_len:\n        name = name[:max_len]\n    if not re.match(r'^[A-Za-z_]', name):\n        name = 'v_' + name\n    return name\n\n\ndef _ensure_columns_exist(df: pd.DataFrame, required_cols: List[str]):\n    missing = [c for c in required_cols if c not in df.columns]\n    if missing:\n        raise KeyError(f\"Missing required columns in CSV: {missing}\")\n\n\ndef _coerce_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:\n    s = pd.to_numeric(df[col], errors='coerce')\n    if s.isna().any():\n        if numeric_fill_missing == 'error':\n            idxs = list(df.index[s.isna()])\n            sample = df.loc[idxs[:5], ['Product_SKU', col]].to_dict(orient='records')\n            raise ValueError(\n                f\"Column '{col}' contains non-numeric or missing values at rows {idxs[:20]}. \"\n                f\"Sample of problematic rows: {sample}. Set numeric_fill_missing to 'fill_zero' or 'fill_mean' to auto-fill.\"\n            )\n        elif numeric_fill_missing == 'fill_zero':\n            s = s.fillna(0.0)\n        elif numeric_fill_missing == 'fill_mean':\n            mean_val = s.mean()\n            s = s.fillna(mean_val)\n        else:\n            raise ValueError(f\"Unknown numeric_fill_missing strategy: {numeric_fill_missing}\")\n    # Validate finite\n    if not np.isfinite(s).all():\n        bad_idx = df.index[~np.isfinite(s)].tolist()\n        raise ValueError(f\"Column '{col}' contains non-finite values at rows {bad_idx[:20]}\")\n    return s\n\n# ------------------------------------------------------------------\n# Preprocessing: load CSV, validate, build model parameters\n# ------------------------------------------------------------------\n\ndef load_and_prepare(csv_path: str) -> Dict[str, Any]:\n    df = pd.read_csv(csv_path)\n\n    _ensure_columns_exist(df, REQUIRED_COLS)\n\n    # Strip whitespace and ensure strings\n    df['Product_SKU'] = df['Product_SKU'].astype(str).str.strip()\n    df['Supplier_ID'] = df['Supplier_ID'].astype(str).str.strip()\n\n    # Coerce numeric fields\n    df['Sale_Price_Per_Unit'] = _coerce_numeric_column(df, 'Sale_Price_Per_Unit').astype(float)\n    df['Material_Cost_Per_Unit'] = _coerce_numeric_column(df, 'Material_Cost_Per_Unit').astype(float)\n    df['Molding_Mins_Req'] = _coerce_numeric_column(df, 'Molding_Mins_Req').astype(float)\n    df['Assembly_Mins_Req'] = _coerce_numeric_column(df, 'Assembly_Mins_Req').astype(float)\n    df['Previous_Quarter_Sales'] = _coerce_numeric_column(df, 'Previous_Quarter_Sales').astype(float)\n    df['Max_Market_Capacity'] = _coerce_numeric_column(df, 'Max_Market_Capacity').astype(float)\n\n    # Use the DataFrame row index to create unique item identifiers so duplicate Product_SKU rows are treated separately\n    df = df.reset_index(drop=False).rename(columns={'index': 'row_index'})\n    # item_id uses row index to be unique: <Product_SKU>__r<row_index>\n    df['item_id'] = df.apply(lambda r: f\"{r['Product_SKU']}__r{int(r['row_index'])}\", axis=1)\n\n    # Prepare lists and dicts\n    item_ids: List[str] = df['item_id'].astype(str).tolist()\n    if len(item_ids) == 0:\n        raise ValueError('No SKUs found in CSV; exiting.')\n\n    # Mapping from item_id back to original Product_SKU for reporting\n    original_sku: Dict[str, str] = dict(zip(item_ids, df['Product_SKU'].astype(str).tolist()))\n\n    price: Dict[str, float] = dict(zip(item_ids, df['Sale_Price_Per_Unit'].astype(float).tolist()))\n    material_cost: Dict[str, float] = dict(zip(item_ids, df['Material_Cost_Per_Unit'].astype(float).tolist()))\n    molding_time: Dict[str, float] = dict(zip(item_ids, df['Molding_Mins_Req'].astype(float).tolist()))\n    assembly_time: Dict[str, float] = dict(zip(item_ids, df['Assembly_Mins_Req'].astype(float).tolist()))\n\n    if use_max_market_capacity_flag:\n        demand_cap_values = df['Max_Market_Capacity'].astype(float)\n    else:\n        demand_cap_values = df['Previous_Quarter_Sales'].astype(float)\n    demand_cap: Dict[str, float] = dict(zip(item_ids, demand_cap_values.tolist()))\n\n    prev_sales: Dict[str, float] = dict(zip(item_ids, df['Previous_Quarter_Sales'].astype(float).tolist()))\n    supplier_of: Dict[str, str] = dict(zip(item_ids, df['Supplier_ID'].astype(str).tolist()))\n\n    # Derived: profit per unit (price - material cost). Users can add per-minute labor cost later if desired.\n    profit_per_unit: Dict[str, float] = {}\n    for i in item_ids:\n        profit_per_unit[i] = float(price[i] - material_cost[i])\n\n    # Default total capacities (minutes) using formula: sum(prev_sales * time_per_unit)\n    total_molding_capacity_default = float((df['Previous_Quarter_Sales'] * df['Molding_Mins_Req']).sum())\n    total_assembly_capacity_default = float((df['Previous_Quarter_Sales'] * df['Assembly_Mins_Req']).sum())\n\n    # Apply overrides if provided (validate non-negative)\n    if molding_capacity_override is not None:\n        if not np.isfinite(molding_capacity_override) or molding_capacity_override < 0:\n            raise ValueError('molding_capacity_override must be a non-negative finite number or None')\n        total_molding_capacity = float(molding_capacity_override)\n    else:\n        total_molding_capacity = total_molding_capacity_default\n\n    if assembly_capacity_override is not None:\n        if not np.isfinite(assembly_capacity_override) or assembly_capacity_override < 0:\n            raise ValueError('assembly_capacity_override must be a non-negative finite number or None')\n        total_assembly_capacity = float(assembly_capacity_override)\n    else:\n        total_assembly_capacity = total_assembly_capacity_default\n\n    # Supplier capacities default: sum(prev_sales) per supplier\n    supplier_capacity_series = df.groupby('Supplier_ID')['Previous_Quarter_Sales'].sum()\n    supplier_capacity: Dict[str, float] = supplier_capacity_series.astype(float).to_dict()\n    if supplier_capacity_override is not None:\n        for k, v in supplier_capacity_override.items():\n            if not np.isfinite(v) or v < 0:\n                raise ValueError('supplier_capacity_override values must be non-negative finite')\n            supplier_capacity[str(k)] = float(v)\n\n    # Validate demand caps are finite; if not, coerce to zero with a warning\n    for i in item_ids:\n        cap = demand_cap.get(i, 0.0)\n        if not np.isfinite(cap) or cap < 0:\n            print(f\"Warning: demand cap for item {i} (SKU {original_sku[i]}) is invalid ({cap}); setting to 0.\")\n            demand_cap[i] = 0.0\n\n    # Final model-parameter dict to return\n    model_params = {\n        'item_ids': item_ids,\n        'original_sku': original_sku,\n        'price': price,\n        'material_cost': material_cost,\n        'molding_time': molding_time,\n        'assembly_time': assembly_time,\n        'demand_cap': demand_cap,\n        'prev_sales': prev_sales,\n        'supplier_of': supplier_of,\n        'profit_per_unit': profit_per_unit,\n        'total_molding_capacity': total_molding_capacity,\n        'total_assembly_capacity': total_assembly_capacity,\n        'supplier_capacity': supplier_capacity,\n        '_internal': {\n            'total_molding_capacity_default': total_molding_capacity_default,\n            'total_assembly_capacity_default': total_assembly_capacity_default,\n            'use_max_market_capacity_flag': use_max_market_capacity_flag,\n            'numeric_fill_missing': numeric_fill_missing,\n            'row_count': len(df)\n        }\n    }\n\n    # Print preprocessing summary\n    print('\\n--- Preprocessing summary ---')\n    print(f\"Rows read: {len(df)}\")\n    print(f\"Number of model items (rows treated as distinct): {len(item_ids)}\")\n    print(f\"Total default molding capacity (minutes) computed from history: {total_molding_capacity_default:.2f}\")\n    print(f\"Total default assembly capacity (minutes) computed from history: {total_assembly_capacity_default:.2f}\")\n    if molding_capacity_override is not None:\n        print(f\"Molding capacity override applied: {total_molding_capacity:.2f}\")\n    if assembly_capacity_override is not None:\n        print(f\"Assembly capacity override applied: {total_assembly_capacity:.2f}\")\n    print(f\"Number of suppliers (unique): {df['Supplier_ID'].nunique()}\")\n\n    sample_items = item_ids[:_SAMPLE_N]\n    print('\\nSample (first {} items):'.format(len(sample_items)))\n    for itm in sample_items:\n        print(f\" item_id: {itm} | SKU={original_sku[itm]} | price={price[itm]:.2f} | mat_cost={material_cost[itm]:.2f} | profit={profit_per_unit[itm]:.2f} | molding_min={molding_time[itm]:.2f} | assembly_min={assembly_time[itm]:.2f} | demand_cap={demand_cap[itm]:.1f} | prev_sales={prev_sales[itm]:.1f} | supplier={supplier_of[itm]}\")\n\n    print('\\nSample supplier capacities (up to 5):')\n    for k, v in list(supplier_capacity.items())[:5]:\n        print(f\" supplier: {k} -> capacity (default historical) = {v:.1f}\")\n\n    print('--- End summary ---\\n')\n\n    return model_params\n\n# ------------------------------------------------------------------\n# Build and solve MILP using PuLP\n# ------------------------------------------------------------------\n\ndef build_and_solve(params: Dict[str, Any]) -> Dict[str, Any]:\n    item_ids: List[str] = params['item_ids']\n    original_sku: Dict[str, str] = params['original_sku']\n    price: Dict[str, float] = params['price']\n    material_cost: Dict[str, float] = params['material_cost']\n    molding_time: Dict[str, float] = params['molding_time']\n    assembly_time: Dict[str, float] = params['assembly_time']\n    demand_cap: Dict[str, float] = params['demand_cap']\n    profit_per_unit: Dict[str, float] = params['profit_per_unit']\n    total_molding_capacity: float = params['total_molding_capacity']\n    total_assembly_capacity: float = params['total_assembly_capacity']\n    supplier_of: Dict[str, str] = params['supplier_of']\n    supplier_capacity: Dict[str, float] = params['supplier_capacity']\n\n    # Create the problem (maximize total profit)\n    prob = pulp.LpProblem('Product_Mix_MaxProfit', pulp.LpMaximize)\n\n    # Decision variables: integer or continuous non-negative units for each item\n    x_vars: Dict[str, pulp.LpVariable] = {}\n    used_safe_names = set()\n    for s in item_ids:\n        ub_raw = float(demand_cap.get(s, 0.0))\n        # Handle non-finite or negative values\n        if not np.isfinite(ub_raw) or ub_raw <= 0:\n            ub_int = 0\n        else:\n            # Choose to floor fractional caps to respect integrality\n            ub_int = max(0, int(math.floor(ub_raw + 1e-9)))\n            if abs(ub_raw - ub_int) > 1e-6:\n                print(f\"Note: demand cap for item '{s}' (SKU {original_sku[s]}) is fractional ({ub_raw}); using floored integer upper bound {ub_int} to respect integrality.\")\n        # Build a unique safe variable name\n        base_safe = safe_name(s, max_len=48)\n        safe = base_safe\n        counter = 1\n        while safe in used_safe_names:\n            safe = f\"{base_safe}_{counter}\"\n            counter += 1\n        used_safe_names.add(safe)\n\n        var_name = f\"x_{safe}\"\n        category = 'Integer' if INTEGRAL_VARS else 'Continuous'\n        # Create variable with integer upper bound ub_int (0 allowed)\n        x_vars[s] = pulp.LpVariable(var_name, lowBound=0, upBound=ub_int, cat=category)\n\n    # Objective: maximize sum profit_per_unit[s] * x[s]\n    prob += pulp.lpSum([profit_per_unit[s] * x_vars[s] for s in item_ids]), 'Total_Profit'\n\n    # Molding capacity constraint\n    if not np.isfinite(total_molding_capacity) or total_molding_capacity < 0:\n        raise ValueError('Computed total_molding_capacity must be finite and >= 0')\n    prob += pulp.lpSum([molding_time[s] * x_vars[s] for s in item_ids]) <= float(total_molding_capacity), 'Molding_Capacity'\n\n    # Assembly capacity constraint\n    if not np.isfinite(total_assembly_capacity) or total_assembly_capacity < 0:\n        raise ValueError('Computed total_assembly_capacity must be finite and >= 0')\n    prob += pulp.lpSum([assembly_time[s] * x_vars[s] for s in item_ids]) <= float(total_assembly_capacity), 'Assembly_Capacity'\n\n    # Per-item demand caps already enforced by variable upper bounds\n\n    # Optional: supplier capacity aggregation\n    if APPLY_SUPPLIER_CAPACITY:\n        supplier_to_items: Dict[str, List[str]] = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n\n        for sup, s_list in supplier_to_items.items():\n            sup_cap_raw = supplier_capacity.get(sup, 0.0)\n            if not np.isfinite(sup_cap_raw) or sup_cap_raw <= 0:\n                sup_cap_int = 0\n            else:\n                sup_cap_int = max(0, int(math.floor(float(sup_cap_raw) + 1e-9)))\n                if abs(sup_cap_raw - sup_cap_int) > 1e-6:\n                    print(f\"Note: supplier capacity for '{sup}' is fractional ({sup_cap_raw}); using floored integer {sup_cap_int}.\")\n            cname = f\"SupplierCap_{safe_name(sup, max_len=48)}\"\n            prob += pulp.lpSum([x_vars[s] for s in s_list]) <= sup_cap_int, cname\n\n    # Solve\n    if PULP_SOLVER is None:\n        res = prob.solve()\n    else:\n        res = prob.solve(PULP_SOLVER)\n\n    status_str = pulp.LpStatus.get(prob.status, 'UNKNOWN')\n    print(f\"\\nSolver status: {status_str} (internal code {prob.status})\")\n\n    # Extract solution values\n    produced: Dict[str, int] = {}\n    for s in item_ids:\n        val = pulp.value(x_vars[s])\n        if val is None:\n            val_num = 0\n        else:\n            # Round to nearest integer (should already be integer if integrality enforced)\n            val_num = int(round(float(val)))\n        produced[s] = val_num\n\n    total_profit = float(pulp.value(prob.objective) if pulp.value(prob.objective) is not None else 0.0)\n    total_units = sum(produced.values())\n    used_molding = sum(molding_time[s] * produced[s] for s in item_ids)\n    used_assembly = sum(assembly_time[s] * produced[s] for s in item_ids)\n\n    molding_util_pct = (used_molding / total_molding_capacity * 100.0) if total_molding_capacity > 0 else float('nan')\n    assembly_util_pct = (used_assembly / total_assembly_capacity * 100.0) if total_assembly_capacity > 0 else float('nan')\n\n    # Print summary with required outputs\n    print('\\n--- Optimization results summary ---')\n    print(f\"Total profit (objective): {total_profit:.2f}\")\n    print(f\"Total units produced: {total_units}\")\n    print(f\"Molding used: {used_molding:.2f} / {total_molding_capacity:.2f} minutes ({molding_util_pct:.1f}%)\")\n    print(f\"Assembly used: {used_assembly:.2f} / {total_assembly_capacity:.2f} minutes ({assembly_util_pct:.1f}%)\")\n    print(f\"Integrality enforced: {INTEGRAL_VARS}\")\n    if APPLY_SUPPLIER_CAPACITY:\n        print('Supplier capacities were enforced.')\n    else:\n        print('Supplier capacities were NOT enforced (APPLY_SUPPLIER_CAPACITY=False).')\n\n    # Print solver full status and objective\n    print('\\nDecision variables (item_id, original_SKU, produced_units, profit_per_unit, demand_cap):')\n    print('item_id,original_SKU,produced_units,profit_per_unit,demand_cap')\n    for s in item_ids:\n        cap = float(demand_cap.get(s, 0.0))\n        pct = (produced[s] / cap * 100.0) if cap > 0 else 0.0\n        print(f\"{s},{original_sku[s]},{produced[s]},{profit_per_unit.get(s,0.0):.2f},{cap:.1f} (fulfilled {pct:.1f}%)\")\n\n    # If supplier capacities were enforced, print summary\n    if APPLY_SUPPLIER_CAPACITY:\n        print('\\nSupplier,capacity,units_assigned,percent_utilized')\n        supplier_to_items = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n        for sup, s_list in supplier_to_items.items():\n            cap_raw = supplier_capacity.get(sup, 0.0)\n            assigned = sum(produced[s] for s in s_list)\n            cap_int = max(0, int(math.floor(float(cap_raw) + 1e-9))) if np.isfinite(cap_raw) else 0\n            pct = (assigned / cap_int * 100.0) if cap_int > 0 else 0.0\n            print(f\"{sup},{cap_int},{assigned},{pct:.1f}\")\n\n    print('\\n--- End of results ---')\n\n    return {\n        'status': status_str,\n        'total_profit': total_profit,\n        'total_units': total_units,\n        'used_molding': used_molding,\n        'used_assembly': used_assembly,\n        'produced': produced,\n        'params_snapshot': {\n            'total_molding_capacity': total_molding_capacity,\n            'total_assembly_capacity': total_assembly_capacity,\n            'integral_vars': INTEGRAL_VARS,\n            'apply_supplier_capacity': APPLY_SUPPLIER_CAPACITY\n        }\n    }\n\n# ------------------------------------------------------------------\n# Main execution\n# ------------------------------------------------------------------\nif __name__ == '__main__':\n    try:\n        params = load_and_prepare(CSV_PATH)\n    except Exception as e:\n        print(f\"Error during preprocessing: {e}\")\n        sys.exit(1)\n\n    try:\n        results = build_and_solve(params)\n    except Exception as e:\n        print(f\"Error during model building/solving: {e}\")\n        sys.exit(1)\n\n    # Script ends here. Results already printed.\n",
+    "final_output": {
+      "code": "\"\"\"\nProduct-mix MILP solver using PuLP.\n- Loads CSV at configured path\n- Preprocesses and validates columns\n- Builds MILP to maximize contribution margin (price - material cost)\n- Respects molding and assembly capacity (defaults from history or overrides)\n- Optionally enforces supplier aggregate capacities\n- Prints solver status, objective value, and decision variable values\n\nThis script is self-contained. Edit the CONFIG section below to change behavior.\n\"\"\"\n\nimport re\nimport math\nimport sys\nfrom typing import Dict, List, Any, Optional\nimport numpy as np\nimport pandas as pd\nimport pulp\n\n# ------------------------------------------------------------------\n# CONFIG - user overrides and behavior flags\n# ------------------------------------------------------------------\n# CSV path (provided)\nCSV_PATH: str = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv\"\n\n# Numeric missing value handling: 'error', 'fill_zero', 'fill_mean'\nnumeric_fill_missing: str = 'error'\n\n# If True use Max_Market_Capacity column as demand_cap. If False, use Previous_Quarter_Sales as fallback.\nuse_max_market_capacity_flag: bool = True\n\n# Overrides for total capacities (minutes). If None, defaults are computed from historical usage.\nmolding_capacity_override: Optional[float] = None\nassembly_capacity_override: Optional[float] = None\n\n# Optional supplier capacity constraints: set to True to enable them. Default False.\nAPPLY_SUPPLIER_CAPACITY: bool = False\n# If enabled, you can also supply a dict override mapping supplier_id -> capacity (units)\nsupplier_capacity_override: Optional[Dict[str, float]] = None\n\n# Integrality: if True variables are Integer. If False they are Continuous (LP relaxation)\nINTEGRAL_VARS: bool = True\n\n# Solver selection: None uses default pulp solver (CBC). To pass a solver instance, set below.\nPULP_SOLVER = None\n\n# How many sample SKUs to show in preprocessing summary\n_SAMPLE_N = 5\n\n# ------------------------------------------------------------------\n# Constants / required columns\n# ------------------------------------------------------------------\nREQUIRED_COLS = [\n    'Product_SKU',\n    'Sale_Price_Per_Unit',\n    'Material_Cost_Per_Unit',\n    'Molding_Mins_Req',\n    'Assembly_Mins_Req',\n    'Previous_Quarter_Sales',\n    'Max_Market_Capacity',\n    'Supplier_ID'\n]\n\n# ------------------------------------------------------------------\n# Helper utilities\n# ------------------------------------------------------------------\n\ndef safe_name(s: Any, max_len: int = 64) -> str:\n    \"\"\"Return a sanitized identifier suitable for variable/constraint names.\n    Keeps alphanumeric and underscores, replaces others with '_', truncates to max_len.\n    Ensures the first character is a letter or underscore by prefixing 'v_' if needed.\n    \"\"\"\n    s_str = str(s)\n    name = re.sub(r'[^0-9a-zA-Z_]', '_', s_str)\n    if len(name) > max_len:\n        name = name[:max_len]\n    if not re.match(r'^[A-Za-z_]', name):\n        name = 'v_' + name\n    return name\n\n\ndef _ensure_columns_exist(df: pd.DataFrame, required_cols: List[str]):\n    missing = [c for c in required_cols if c not in df.columns]\n    if missing:\n        raise KeyError(f\"Missing required columns in CSV: {missing}\")\n\n\ndef _coerce_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:\n    s = pd.to_numeric(df[col], errors='coerce')\n    if s.isna().any():\n        if numeric_fill_missing == 'error':\n            idxs = list(df.index[s.isna()])\n            sample = df.loc[idxs[:5], ['Product_SKU', col]].to_dict(orient='records')\n            raise ValueError(\n                f\"Column '{col}' contains non-numeric or missing values at rows {idxs[:20]}. \"\n                f\"Sample of problematic rows: {sample}. Set numeric_fill_missing to 'fill_zero' or 'fill_mean' to auto-fill.\"\n            )\n        elif numeric_fill_missing == 'fill_zero':\n            s = s.fillna(0.0)\n        elif numeric_fill_missing == 'fill_mean':\n            mean_val = s.mean()\n            s = s.fillna(mean_val)\n        else:\n            raise ValueError(f\"Unknown numeric_fill_missing strategy: {numeric_fill_missing}\")\n    # Validate finite\n    if not np.isfinite(s).all():\n        bad_idx = df.index[~np.isfinite(s)].tolist()\n        raise ValueError(f\"Column '{col}' contains non-finite values at rows {bad_idx[:20]}\")\n    return s\n\n# ------------------------------------------------------------------\n# Preprocessing: load CSV, validate, build model parameters\n# ------------------------------------------------------------------\n\ndef load_and_prepare(csv_path: str) -> Dict[str, Any]:\n    df = pd.read_csv(csv_path)\n\n    _ensure_columns_exist(df, REQUIRED_COLS)\n\n    # Strip whitespace and ensure strings\n    df['Product_SKU'] = df['Product_SKU'].astype(str).str.strip()\n    df['Supplier_ID'] = df['Supplier_ID'].astype(str).str.strip()\n\n    # Coerce numeric fields\n    df['Sale_Price_Per_Unit'] = _coerce_numeric_column(df, 'Sale_Price_Per_Unit').astype(float)\n    df['Material_Cost_Per_Unit'] = _coerce_numeric_column(df, 'Material_Cost_Per_Unit').astype(float)\n    df['Molding_Mins_Req'] = _coerce_numeric_column(df, 'Molding_Mins_Req').astype(float)\n    df['Assembly_Mins_Req'] = _coerce_numeric_column(df, 'Assembly_Mins_Req').astype(float)\n    df['Previous_Quarter_Sales'] = _coerce_numeric_column(df, 'Previous_Quarter_Sales').astype(float)\n    df['Max_Market_Capacity'] = _coerce_numeric_column(df, 'Max_Market_Capacity').astype(float)\n\n    # Use the DataFrame row index to create unique item identifiers so duplicate Product_SKU rows are treated separately\n    df = df.reset_index(drop=False).rename(columns={'index': 'row_index'})\n    # item_id uses row index to be unique: <Product_SKU>__r<row_index>\n    df['item_id'] = df.apply(lambda r: f\"{r['Product_SKU']}__r{int(r['row_index'])}\", axis=1)\n\n    # Prepare lists and dicts\n    item_ids: List[str] = df['item_id'].astype(str).tolist()\n    if len(item_ids) == 0:\n        raise ValueError('No SKUs found in CSV; exiting.')\n\n    # Mapping from item_id back to original Product_SKU for reporting\n    original_sku: Dict[str, str] = dict(zip(item_ids, df['Product_SKU'].astype(str).tolist()))\n\n    price: Dict[str, float] = dict(zip(item_ids, df['Sale_Price_Per_Unit'].astype(float).tolist()))\n    material_cost: Dict[str, float] = dict(zip(item_ids, df['Material_Cost_Per_Unit'].astype(float).tolist()))\n    molding_time: Dict[str, float] = dict(zip(item_ids, df['Molding_Mins_Req'].astype(float).tolist()))\n    assembly_time: Dict[str, float] = dict(zip(item_ids, df['Assembly_Mins_Req'].astype(float).tolist()))\n\n    if use_max_market_capacity_flag:\n        demand_cap_values = df['Max_Market_Capacity'].astype(float)\n    else:\n        demand_cap_values = df['Previous_Quarter_Sales'].astype(float)\n    demand_cap: Dict[str, float] = dict(zip(item_ids, demand_cap_values.tolist()))\n\n    prev_sales: Dict[str, float] = dict(zip(item_ids, df['Previous_Quarter_Sales'].astype(float).tolist()))\n    supplier_of: Dict[str, str] = dict(zip(item_ids, df['Supplier_ID'].astype(str).tolist()))\n\n    # Derived: profit per unit (price - material cost). Users can add per-minute labor cost later if desired.\n    profit_per_unit: Dict[str, float] = {}\n    for i in item_ids:\n        profit_per_unit[i] = float(price[i] - material_cost[i])\n\n    # Default total capacities (minutes) using formula: sum(prev_sales * time_per_unit)\n    total_molding_capacity_default = float((df['Previous_Quarter_Sales'] * df['Molding_Mins_Req']).sum())\n    total_assembly_capacity_default = float((df['Previous_Quarter_Sales'] * df['Assembly_Mins_Req']).sum())\n\n    # Apply overrides if provided (validate non-negative)\n    if molding_capacity_override is not None:\n        if not np.isfinite(molding_capacity_override) or molding_capacity_override < 0:\n            raise ValueError('molding_capacity_override must be a non-negative finite number or None')\n        total_molding_capacity = float(molding_capacity_override)\n    else:\n        total_molding_capacity = total_molding_capacity_default\n\n    if assembly_capacity_override is not None:\n        if not np.isfinite(assembly_capacity_override) or assembly_capacity_override < 0:\n            raise ValueError('assembly_capacity_override must be a non-negative finite number or None')\n        total_assembly_capacity = float(assembly_capacity_override)\n    else:\n        total_assembly_capacity = total_assembly_capacity_default\n\n    # Supplier capacities default: sum(prev_sales) per supplier\n    supplier_capacity_series = df.groupby('Supplier_ID')['Previous_Quarter_Sales'].sum()\n    supplier_capacity: Dict[str, float] = supplier_capacity_series.astype(float).to_dict()\n    if supplier_capacity_override is not None:\n        for k, v in supplier_capacity_override.items():\n            if not np.isfinite(v) or v < 0:\n                raise ValueError('supplier_capacity_override values must be non-negative finite')\n            supplier_capacity[str(k)] = float(v)\n\n    # Validate demand caps are finite; if not, coerce to zero with a warning\n    for i in item_ids:\n        cap = demand_cap.get(i, 0.0)\n        if not np.isfinite(cap) or cap < 0:\n            print(f\"Warning: demand cap for item {i} (SKU {original_sku[i]}) is invalid ({cap}); setting to 0.\")\n            demand_cap[i] = 0.0\n\n    # Final model-parameter dict to return\n    model_params = {\n        'item_ids': item_ids,\n        'original_sku': original_sku,\n        'price': price,\n        'material_cost': material_cost,\n        'molding_time': molding_time,\n        'assembly_time': assembly_time,\n        'demand_cap': demand_cap,\n        'prev_sales': prev_sales,\n        'supplier_of': supplier_of,\n        'profit_per_unit': profit_per_unit,\n        'total_molding_capacity': total_molding_capacity,\n        'total_assembly_capacity': total_assembly_capacity,\n        'supplier_capacity': supplier_capacity,\n        '_internal': {\n            'total_molding_capacity_default': total_molding_capacity_default,\n            'total_assembly_capacity_default': total_assembly_capacity_default,\n            'use_max_market_capacity_flag': use_max_market_capacity_flag,\n            'numeric_fill_missing': numeric_fill_missing,\n            'row_count': len(df)\n        }\n    }\n\n    # Print preprocessing summary\n    print('\\n--- Preprocessing summary ---')\n    print(f\"Rows read: {len(df)}\")\n    print(f\"Number of model items (rows treated as distinct): {len(item_ids)}\")\n    print(f\"Total default molding capacity (minutes) computed from history: {total_molding_capacity_default:.2f}\")\n    print(f\"Total default assembly capacity (minutes) computed from history: {total_assembly_capacity_default:.2f}\")\n    if molding_capacity_override is not None:\n        print(f\"Molding capacity override applied: {total_molding_capacity:.2f}\")\n    if assembly_capacity_override is not None:\n        print(f\"Assembly capacity override applied: {total_assembly_capacity:.2f}\")\n    print(f\"Number of suppliers (unique): {df['Supplier_ID'].nunique()}\")\n\n    sample_items = item_ids[:_SAMPLE_N]\n    print('\\nSample (first {} items):'.format(len(sample_items)))\n    for itm in sample_items:\n        print(f\" item_id: {itm} | SKU={original_sku[itm]} | price={price[itm]:.2f} | mat_cost={material_cost[itm]:.2f} | profit={profit_per_unit[itm]:.2f} | molding_min={molding_time[itm]:.2f} | assembly_min={assembly_time[itm]:.2f} | demand_cap={demand_cap[itm]:.1f} | prev_sales={prev_sales[itm]:.1f} | supplier={supplier_of[itm]}\")\n\n    print('\\nSample supplier capacities (up to 5):')\n    for k, v in list(supplier_capacity.items())[:5]:\n        print(f\" supplier: {k} -> capacity (default historical) = {v:.1f}\")\n\n    print('--- End summary ---\\n')\n\n    return model_params\n\n# ------------------------------------------------------------------\n# Build and solve MILP using PuLP\n# ------------------------------------------------------------------\n\ndef build_and_solve(params: Dict[str, Any]) -> Dict[str, Any]:\n    item_ids: List[str] = params['item_ids']\n    original_sku: Dict[str, str] = params['original_sku']\n    price: Dict[str, float] = params['price']\n    material_cost: Dict[str, float] = params['material_cost']\n    molding_time: Dict[str, float] = params['molding_time']\n    assembly_time: Dict[str, float] = params['assembly_time']\n    demand_cap: Dict[str, float] = params['demand_cap']\n    profit_per_unit: Dict[str, float] = params['profit_per_unit']\n    total_molding_capacity: float = params['total_molding_capacity']\n    total_assembly_capacity: float = params['total_assembly_capacity']\n    supplier_of: Dict[str, str] = params['supplier_of']\n    supplier_capacity: Dict[str, float] = params['supplier_capacity']\n\n    # Create the problem (maximize total profit)\n    prob = pulp.LpProblem('Product_Mix_MaxProfit', pulp.LpMaximize)\n\n    # Decision variables: integer or continuous non-negative units for each item\n    x_vars: Dict[str, pulp.LpVariable] = {}\n    used_safe_names = set()\n    for s in item_ids:\n        ub_raw = float(demand_cap.get(s, 0.0))\n        # Handle non-finite or negative values\n        if not np.isfinite(ub_raw) or ub_raw <= 0:\n            ub_int = 0\n        else:\n            # Choose to floor fractional caps to respect integrality\n            ub_int = max(0, int(math.floor(ub_raw + 1e-9)))\n            if abs(ub_raw - ub_int) > 1e-6:\n                print(f\"Note: demand cap for item '{s}' (SKU {original_sku[s]}) is fractional ({ub_raw}); using floored integer upper bound {ub_int} to respect integrality.\")\n        # Build a unique safe variable name\n        base_safe = safe_name(s, max_len=48)\n        safe = base_safe\n        counter = 1\n        while safe in used_safe_names:\n            safe = f\"{base_safe}_{counter}\"\n            counter += 1\n        used_safe_names.add(safe)\n\n        var_name = f\"x_{safe}\"\n        category = 'Integer' if INTEGRAL_VARS else 'Continuous'\n        # Create variable with integer upper bound ub_int (0 allowed)\n        x_vars[s] = pulp.LpVariable(var_name, lowBound=0, upBound=ub_int, cat=category)\n\n    # Objective: maximize sum profit_per_unit[s] * x[s]\n    prob += pulp.lpSum([profit_per_unit[s] * x_vars[s] for s in item_ids]), 'Total_Profit'\n\n    # Molding capacity constraint\n    if not np.isfinite(total_molding_capacity) or total_molding_capacity < 0:\n        raise ValueError('Computed total_molding_capacity must be finite and >= 0')\n    prob += pulp.lpSum([molding_time[s] * x_vars[s] for s in item_ids]) <= float(total_molding_capacity), 'Molding_Capacity'\n\n    # Assembly capacity constraint\n    if not np.isfinite(total_assembly_capacity) or total_assembly_capacity < 0:\n        raise ValueError('Computed total_assembly_capacity must be finite and >= 0')\n    prob += pulp.lpSum([assembly_time[s] * x_vars[s] for s in item_ids]) <= float(total_assembly_capacity), 'Assembly_Capacity'\n\n    # Per-item demand caps already enforced by variable upper bounds\n\n    # Optional: supplier capacity aggregation\n    if APPLY_SUPPLIER_CAPACITY:\n        supplier_to_items: Dict[str, List[str]] = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n\n        for sup, s_list in supplier_to_items.items():\n            sup_cap_raw = supplier_capacity.get(sup, 0.0)\n            if not np.isfinite(sup_cap_raw) or sup_cap_raw <= 0:\n                sup_cap_int = 0\n            else:\n                sup_cap_int = max(0, int(math.floor(float(sup_cap_raw) + 1e-9)))\n                if abs(sup_cap_raw - sup_cap_int) > 1e-6:\n                    print(f\"Note: supplier capacity for '{sup}' is fractional ({sup_cap_raw}); using floored integer {sup_cap_int}.\")\n            cname = f\"SupplierCap_{safe_name(sup, max_len=48)}\"\n            prob += pulp.lpSum([x_vars[s] for s in s_list]) <= sup_cap_int, cname\n\n    # Solve\n    if PULP_SOLVER is None:\n        res = prob.solve()\n    else:\n        res = prob.solve(PULP_SOLVER)\n\n    status_str = pulp.LpStatus.get(prob.status, 'UNKNOWN')\n    print(f\"\\nSolver status: {status_str} (internal code {prob.status})\")\n\n    # Extract solution values\n    produced: Dict[str, int] = {}\n    for s in item_ids:\n        val = pulp.value(x_vars[s])\n        if val is None:\n            val_num = 0\n        else:\n            # Round to nearest integer (should already be integer if integrality enforced)\n            val_num = int(round(float(val)))\n        produced[s] = val_num\n\n    total_profit = float(pulp.value(prob.objective) if pulp.value(prob.objective) is not None else 0.0)\n    total_units = sum(produced.values())\n    used_molding = sum(molding_time[s] * produced[s] for s in item_ids)\n    used_assembly = sum(assembly_time[s] * produced[s] for s in item_ids)\n\n    molding_util_pct = (used_molding / total_molding_capacity * 100.0) if total_molding_capacity > 0 else float('nan')\n    assembly_util_pct = (used_assembly / total_assembly_capacity * 100.0) if total_assembly_capacity > 0 else float('nan')\n\n    # Print summary with required outputs\n    print('\\n--- Optimization results summary ---')\n    print(f\"Total profit (objective): {total_profit:.2f}\")\n    print(f\"Total units produced: {total_units}\")\n    print(f\"Molding used: {used_molding:.2f} / {total_molding_capacity:.2f} minutes ({molding_util_pct:.1f}%)\")\n    print(f\"Assembly used: {used_assembly:.2f} / {total_assembly_capacity:.2f} minutes ({assembly_util_pct:.1f}%)\")\n    print(f\"Integrality enforced: {INTEGRAL_VARS}\")\n    if APPLY_SUPPLIER_CAPACITY:\n        print('Supplier capacities were enforced.')\n    else:\n        print('Supplier capacities were NOT enforced (APPLY_SUPPLIER_CAPACITY=False).')\n\n    # Print solver full status and objective\n    print('\\nDecision variables (item_id, original_SKU, produced_units, profit_per_unit, demand_cap):')\n    print('item_id,original_SKU,produced_units,profit_per_unit,demand_cap')\n    for s in item_ids:\n        cap = float(demand_cap.get(s, 0.0))\n        pct = (produced[s] / cap * 100.0) if cap > 0 else 0.0\n        print(f\"{s},{original_sku[s]},{produced[s]},{profit_per_unit.get(s,0.0):.2f},{cap:.1f} (fulfilled {pct:.1f}%)\")\n\n    # If supplier capacities were enforced, print summary\n    if APPLY_SUPPLIER_CAPACITY:\n        print('\\nSupplier,capacity,units_assigned,percent_utilized')\n        supplier_to_items = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n        for sup, s_list in supplier_to_items.items():\n            cap_raw = supplier_capacity.get(sup, 0.0)\n            assigned = sum(produced[s] for s in s_list)\n            cap_int = max(0, int(math.floor(float(cap_raw) + 1e-9))) if np.isfinite(cap_raw) else 0\n            pct = (assigned / cap_int * 100.0) if cap_int > 0 else 0.0\n            print(f\"{sup},{cap_int},{assigned},{pct:.1f}\")\n\n    print('\\n--- End of results ---')\n\n    return {\n        'status': status_str,\n        'total_profit': total_profit,\n        'total_units': total_units,\n        'used_molding': used_molding,\n        'used_assembly': used_assembly,\n        'produced': produced,\n        'params_snapshot': {\n            'total_molding_capacity': total_molding_capacity,\n            'total_assembly_capacity': total_assembly_capacity,\n            'integral_vars': INTEGRAL_VARS,\n            'apply_supplier_capacity': APPLY_SUPPLIER_CAPACITY\n        }\n    }\n\n# ------------------------------------------------------------------\n# Main execution\n# ------------------------------------------------------------------\nif __name__ == '__main__':\n    try:\n        params = load_and_prepare(CSV_PATH)\n    except Exception as e:\n        print(f\"Error during preprocessing: {e}\")\n        sys.exit(1)\n\n    try:\n        results = build_and_solve(params)\n    except Exception as e:\n        print(f\"Error during model building/solving: {e}\")\n        sys.exit(1)\n\n    # Script ends here. Results already printed.\n",
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "total_profit": {
+            "type": "number"
+          },
+          "total_units": {
+            "type": "integer"
+          },
+          "used_molding": {
+            "type": "number"
+          },
+          "used_assembly": {
+            "type": "number"
+          },
+          "produced": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "status",
+          "total_profit",
+          "produced"
+        ]
+      },
+      "successful_implementation": true,
+      "notes": [
+        "Duplicate Product_SKU rows are now treated as distinct model items by appending the original DataFrame row index to create unique item identifiers (item_id).",
+        "Item identifiers are sanitized for variable/constraint names to avoid illegal characters.",
+        "Numeric columns are validated for finiteness; invalid demand caps are coerced to zero with a warning.",
+        "Fractional demand/supplier capacities are floored to integer upper bounds to respect integrality; the script prints a note when this occurs.",
+        "If you want supplier-capacity constraints enabled, set APPLY_SUPPLIER_CAPACITY=True and optionally provide supplier_capacity_override."
+      ]
+    },
+    "status": "ok",
+    "traces": [
+      "csv_resolved",
+      "csv_loaded:80rows",
+      "plan_generated:6tasks",
+      "executed_task:data_inspection",
+      "executed_task:use_case_analysis_production_mixing",
+      "executed_task:modeling_milp_formulation",
+      "interrupted_for_feedback",
+      "executed_task:modeling_milp_formulation",
+      "executed_task:preprocessing_build_parameters",
+      "executed_task:coding_pulp_solver",
+      "executed_task:validation_syntax_and_smoke",
+      "execution_done:ok=6,errors=0",
+      "assembly_done",
+      "code_saved:C:\\Users\\simon\\6_Semester\\kip\\KIP_texprompter\\texprompter\\TestOutputs\\deep_generated_pulp_model.py",
+      "total_time:344.1s"
+    ],
+    "errors": [],
+    "use_case": {
+      "chosen_use_case": "Product-mix / production planning to maximize contribution margin (profit proxy) subject to molding and assembly time limits and market demand caps per SKU.",
+      "objective_formula": "Maximize total contribution = sum_{s in SKUs} (Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s]) * x_s. (If user supplies per-minute labor costs, objective can be extended to subtract molding and assembly labor cost: sum_s (price[s] - material_cost[s] - molding_cost_per_min * Molding_Mins_Req[s] - assembly_cost_per_min * Assembly_Mins_Req[s]) * x_s.)",
+      "decision_variables": [
+        {
+          "name": "x_s",
+          "description": "Units of Product_SKU s to produce (and sell) in the planning period",
+          "domain": "integer, x_s >= 0 (can be relaxed to continuous if volumes are large and integrality not critical)"
+        }
+      ],
+      "constraint_specifications": [
+        {
+          "name": "Molding_capacity_constraint",
+          "formula_text": "sum_{s} Molding_Mins_Req[s] * x_s <= molding_capacity_total_minutes",
+          "columns_used": [
+            "Product_SKU",
+            "Molding_Mins_Req"
+          ],
+          "binding": true
+        },
+        {
+          "name": "Assembly_capacity_constraint",
+          "formula_text": "sum_{s} Assembly_Mins_Req[s] * x_s <= assembly_capacity_total_minutes",
+          "columns_used": [
+            "Product_SKU",
+            "Assembly_Mins_Req"
+          ],
+          "binding": true
+        },
+        {
+          "name": "Per_SKU_market_cap",
+          "formula_text": "0 <= x_s <= Max_Market_Capacity[s]  for each SKU s",
+          "columns_used": [
+            "Product_SKU",
+            "Max_Market_Capacity"
+          ],
+          "binding": true,
+          "note": "Use Max_Market_Capacity only after the user confirms it is in the same time window as the planning period. If unreliable, allow user to supply demand_forecast_cap[s] instead."
+        },
+        {
+          "name": "Optional_demand_floor_based_on_history",
+          "formula_text": "x_s >= demand_floor_fraction * Previous_Quarter_Sales[s]  for prioritized SKUs (optional)",
+          "columns_used": [
+            "Product_SKU",
+            "Previous_Quarter_Sales",
+            "Customer_Rating_Avg"
+          ],
+          "binding": false,
+          "note": "Useful if business needs to preserve service levels or keep production close to historical levels; enable only if desired."
+        },
+        {
+          "name": "Supplier_capacity_aggregate (optional)",
+          "formula_text": "For each supplier k: sum_{s supplied_by_k} x_s <= supplier_capacity[k]",
+          "columns_used": [
+            "Product_SKU",
+            "Supplier_ID"
+          ],
+          "binding": false,
+          "note": "Requires per-supplier capacity limits which are not in the CSV by default."
+        },
+        {
+          "name": "Integrality_nonnegativity",
+          "formula_text": "x_s integer and x_s >= 0 for all s",
+          "binding": true
+        }
+      ],
+      "list_of_required_parameters": [
+        {
+          "parameter_name": "molding_capacity_total_minutes",
+          "required": true,
+          "recommended_default_formula": "sum_s (Previous_Quarter_Sales[s] * Molding_Mins_Req[s])",
+          "recommended_default_explanation": "Set capacity to the total molding minutes used in the previous quarter (i.e., assume current capacity equals past production). This yields a baseline feasible capacity. Make this configurable; users may increase by capacity_buffer_factor (e.g., 1.05) if they expect expansion.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "assembly_capacity_total_minutes",
+          "required": true,
+          "recommended_default_formula": "sum_s (Previous_Quarter_Sales[s] * Assembly_Mins_Req[s])",
+          "recommended_default_explanation": "Analogous to molding capacity: default to historical total assembly minutes used. Configurable and can be scaled by a factor for expected changes.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "planning_period_label_and_time_unit",
+          "required": true,
+          "recommended_default_value": "\"previous_quarter\" (use same period as Previous_Quarter_Sales unless user specifies otherwise)",
+          "recommended_default_explanation": "Clarifies the time window for capacities and Max_Market_Capacity. Important because Previous_Quarter_Sales and Max_Market_Capacity may be on different time bases.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "use_max_market_capacity_as_demand_cap_flag",
+          "required": true,
+          "recommended_default_value": "true (but user must confirm units/timeframes align). If not aligned, user should provide demand_forecast_cap[s].",
+          "recommended_default_explanation": "If Max_Market_Capacity is valid for the planning period, use it as upper bound. Otherwise, replace with user-supplied demand caps.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "demand_forecast_cap[s] (optional replacement for Max_Market_Capacity)",
+          "required": false,
+          "recommended_default_formula": "If Max_Market_Capacity is suspect, set demand_forecast_cap[s] = Previous_Quarter_Sales[s] (or min(Previous_Quarter_Sales[s], Max_Market_Capacity[s]) if both believed partially valid).",
+          "recommended_default_explanation": "Provides a conservative, history-based demand cap when Max_Market_Capacity appears inconsistent.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "labor_cost_per_molding_minute (optional)",
+          "required": false,
+          "recommended_default_value": 0.0,
+          "recommended_default_explanation": "CSV does not include per-minute labor cost for molding. Default to 0 so objective uses contribution margin from price - material_cost. If provided, objective should be extended to subtract molding_cost_per_min * Molding_Mins_Req[s].",
+          "configurable": true
+        },
+        {
+          "parameter_name": "labor_cost_per_assembly_minute (optional)",
+          "required": false,
+          "recommended_default_value": 0.0,
+          "recommended_default_explanation": "Same rationale as molding labor cost. If set >0, include in objective as assembly_cost_per_min * Assembly_Mins_Req[s].",
+          "configurable": true
+        },
+        {
+          "parameter_name": "supplier_capacity[k] (optional)",
+          "required": false,
+          "recommended_default_value": "not set by default; if needed, set supplier_capacity[k] = sum_{s supplied_by_k} Previous_Quarter_Sales[s]",
+          "recommended_default_explanation": "No per-supplier capacities in CSV. Defaulting to historical supply volume per supplier is defensible; include only if supplier constraints are important.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "demand_floor_fraction and rating_threshold (optional business-rule for minimum production)",
+          "required": false,
+          "recommended_default_value": "not active by default; example defaults: rating_threshold = 4.5, demand_floor_fraction = 0.5",
+          "recommended_default_explanation": "If business requires minimum production for high-rated products, these parameters control that rule. Disabled by default.",
+          "configurable": true
+        },
+        {
+          "parameter_name": "integrality_flag",
+          "required": true,
+          "recommended_default_value": "true (integer x_s). If performance / scale requires, solver can relax to continuous.",
+          "recommended_default_explanation": "Keep integer by default because units are discrete; allow continuous relaxation in large-scale approximations.",
+          "configurable": true
+        }
+      ],
+      "notes_and_implementation_guidance": [
+        "Objective choice: using (Sale_Price_Per_Unit - Material_Cost_Per_Unit) as the variable profit per unit is defensible given the data. If true manufacturing labor costs exist, supply molding/assembly per-minute costs to include them in the objective.",
+        "Validation step required before running: confirm that Max_Market_Capacity and Previous_Quarter_Sales are on the same time basis (both quarterly or both monthly). The data_inspection flagged a likely mismatch (Previous_Quarter_Sales much larger than Max_Market_Capacity) \u2014 if mismatch is confirmed, use demand_forecast_cap[s] derived from historical sales or obtain corrected market caps.",
+        "Default capacities set equal to historical usage make the model immediately solvable and reflect current throughput. If the business wants to plan for expansion or a shorter planning period, scale the defaults by a buffer or change the planning_period_label.",
+        "Optional advanced constraints (supplier aggregated caps, minimum production for high-rated SKUs, cardinality limits on number of SKUs produced) are recommended only when business rules require them; keep them disabled by default to keep the model simple and tractable."
+      ]
+    },
+    "modelling": {
+      "sets": {
+        "S": {
+          "description": "Set of SKUs (product items). Index s ranges over all Product_SKU rows in the CSV.",
+          "example_source_column": "Product_SKU",
+          "size": 80
+        },
+        "K": {
+          "description": "Set of suppliers (used only if supplier-level constraints are activated). Index k ranges over unique Supplier_ID values in the CSV.",
+          "example_source_column": "Supplier_ID",
+          "size_estimate": 4
+        }
+      },
+      "parameters": {
+        "Sale_Price_Per_Unit[s]": {
+          "type": "float",
+          "unit": "currency per unit",
+          "source": "CSV column 'Sale_Price_Per_Unit'",
+          "description": "Revenue when one unit of SKU s is sold."
+        },
+        "Material_Cost_Per_Unit[s]": {
+          "type": "float",
+          "unit": "currency per unit",
+          "source": "CSV column 'Material_Cost_Per_Unit'",
+          "description": "Variable material cost required to produce one unit of SKU s."
+        },
+        "Molding_Mins_Req[s]": {
+          "type": "float",
+          "unit": "minutes per unit",
+          "source": "CSV column 'Molding_Mins_Req'",
+          "description": "Molding time required to produce one unit of SKU s."
+        },
+        "Assembly_Mins_Req[s]": {
+          "type": "float",
+          "unit": "minutes per unit",
+          "source": "CSV column 'Assembly_Mins_Req'",
+          "description": "Assembly time required to produce one unit of SKU s."
+        },
+        "Previous_Quarter_Sales[s]": {
+          "type": "float",
+          "unit": "units (previous quarter)",
+          "source": "CSV column 'Previous_Quarter_Sales'",
+          "description": "Historical sales (used to derive default capacities or demand caps)."
+        },
+        "Max_Market_Capacity[s]": {
+          "type": "float",
+          "unit": "units (per planning period)",
+          "source": "CSV column 'Max_Market_Capacity'",
+          "description": "Upper bound on demand for SKU s as provided in the CSV. MUST be checked to be on same time base as planning_period."
+        },
+        "Customer_Rating_Avg[s]": {
+          "type": "float",
+          "unit": "rating (e.g., 1-5)",
+          "source": "CSV column 'Customer_Rating_Avg'",
+          "description": "Average customer rating for SKU s (optional business-rule usage)."
+        },
+        "Supplier_of_s[s]": {
+          "type": "string",
+          "unit": "identifier",
+          "source": "CSV column 'Supplier_ID'",
+          "description": "Supplier ID for SKU s (used if supplier-level aggregate constraints enabled)."
+        },
+        "planning_period_label": {
+          "type": "string",
+          "unit": "n/a",
+          "source": "user-specified default: 'previous_quarter'",
+          "description": "Label for the planning period. Defaults to 'previous_quarter' to match Previous_Quarter_Sales units."
+        },
+        "use_max_market_capacity_flag": {
+          "type": "boolean",
+          "unit": "n/a",
+          "source": "user-configurable default: true",
+          "description": "If true, use Max_Market_Capacity[s] as the demand cap; otherwise use demand_forecast_cap[s] or Previous_Quarter_Sales[s]."
+        },
+        "demand_forecast_cap[s]": {
+          "type": "float",
+          "unit": "units (per planning period)",
+          "source": "user-provided or default computed",
+          "description": "User-supplied demand cap for SKU s for the planning period. Default if not provided: if use_max_market_capacity_flag is true then Max_Market_Capacity[s], else Previous_Quarter_Sales[s]."
+        },
+        "molding_capacity_total_minutes": {
+          "type": "float",
+          "unit": "minutes (per planning period)",
+          "source": "user-provided or default computed",
+          "default_formula": "sum_{s in S} Previous_Quarter_Sales[s] * Molding_Mins_Req[s]",
+          "description": "Total available molding minutes in the planning period. Default: historical molding minutes used in previous quarter."
+        },
+        "assembly_capacity_total_minutes": {
+          "type": "float",
+          "unit": "minutes (per planning period)",
+          "source": "user-provided or default computed",
+          "default_formula": "sum_{s in S} Previous_Quarter_Sales[s] * Assembly_Mins_Req[s]",
+          "description": "Total available assembly minutes in the planning period. Default: historical assembly minutes used in previous quarter."
+        },
+        "molding_cost_per_min": {
+          "type": "float",
+          "unit": "currency per minute",
+          "source": "user-configurable default: 0.0",
+          "description": "Labor/overhead cost charged per molding minute. Optional; defaults to 0 so objective uses sale price - material cost only."
+        },
+        "assembly_cost_per_min": {
+          "type": "float",
+          "unit": "currency per minute",
+          "source": "user-configurable default: 0.0",
+          "description": "Labor/overhead cost charged per assembly minute. Optional; defaults to 0."
+        },
+        "supplier_capacity[k]": {
+          "type": "float",
+          "unit": "units (per planning period)",
+          "source": "user-configurable default: sum_{s with Supplier_of_s[s]==k} Previous_Quarter_Sales[s]",
+          "description": "Optional per-supplier capacity (aggregate across SKUs supplied by k). Not present in CSV; default defensible setting equals historical supplied volume."
+        },
+        "demand_floor_fraction": {
+          "type": "float (0-1)",
+          "unit": "dimensionless",
+          "source": "user-configurable default: 0.0 (disabled)",
+          "description": "Optional fraction of Previous_Quarter_Sales enforced as minimum production for selected SKUs. Default 0 => disabled."
+        },
+        "rating_threshold_for_floor": {
+          "type": "float",
+          "unit": "rating (e.g., 1-5)",
+          "source": "user-configurable default: 4.5",
+          "description": "If demand-floor rule enabled, apply to SKUs with Customer_Rating_Avg[s] >= rating_threshold_for_floor."
+        },
+        "integrality_flag": {
+          "type": "boolean",
+          "unit": "n/a",
+          "source": "user-configurable default: true",
+          "description": "If true, decision variables x_s are integer. Default true because units are discrete."
+        }
+      },
+      "derived_parameters": {
+        "profit_per_unit[s]": {
+          "formula": "Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s] - molding_cost_per_min * Molding_Mins_Req[s] - assembly_cost_per_min * Assembly_Mins_Req[s]",
+          "type": "float",
+          "unit": "currency per unit",
+          "description": "Contribution margin per unit of SKU s after optional per-minute labor costs are subtracted. If molding_cost_per_min and assembly_cost_per_min are 0, this reduces to Sale_Price_Per_Unit - Material_Cost_Per_Unit."
+        },
+        "demand_cap_used[s]": {
+          "formula": "if use_max_market_capacity_flag then Max_Market_Capacity[s] else demand_forecast_cap[s] (fallback: Previous_Quarter_Sales[s])",
+          "type": "float",
+          "unit": "units (per planning period)",
+          "description": "Effective upper demand bound used in the model for SKU s."
+        }
+      },
+      "variables": {
+        "x_s for s in S": {
+          "domain": "integer nonnegative (Z_+)",
+          "description": "Number of units of SKU s to produce (and sell) in the planning period; if integrality_flag==false can be relaxed to continuous >=0"
+        }
+      },
+      "objective": {
+        "sense": "maximize",
+        "expression": "Maximize Z = sum_{s in S} profit_per_unit[s] * x_s",
+        "explanation": "Maximize total contribution margin over produced units. profit_per_unit[s] defined in derived_parameters.",
+        "coefficients_mapping": {
+          "coefficient_name": "profit_per_unit[s]",
+          "definition": "Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s] - molding_cost_per_min * Molding_Mins_Req[s] - assembly_cost_per_min * Assembly_Mins_Req[s]",
+          "source_columns": [
+            "Sale_Price_Per_Unit",
+            "Material_Cost_Per_Unit",
+            "Molding_Mins_Req",
+            "Assembly_Mins_Req"
+          ],
+          "defaults_used": [
+            "molding_cost_per_min (default 0.0)",
+            "assembly_cost_per_min (default 0.0)"
+          ]
+        }
+      },
+      "constraints": [
+        {
+          "name": "Molding capacity",
+          "lhs": "sum_{s in S} Molding_Mins_Req[s] * x_s",
+          "operator": "<=",
+          "rhs": "molding_capacity_total_minutes",
+          "used_parameters": [
+            "Molding_Mins_Req[s]",
+            "x_s",
+            "molding_capacity_total_minutes"
+          ],
+          "optional": false,
+          "notes": "Enforces that total molding minutes used do not exceed available molding minutes in planning period."
+        },
+        {
+          "name": "Assembly capacity",
+          "lhs": "sum_{s in S} Assembly_Mins_Req[s] * x_s",
+          "operator": "<=",
+          "rhs": "assembly_capacity_total_minutes",
+          "used_parameters": [
+            "Assembly_Mins_Req[s]",
+            "x_s",
+            "assembly_capacity_total_minutes"
+          ],
+          "optional": false,
+          "notes": "Enforces that total assembly minutes used do not exceed available assembly minutes in planning period."
+        },
+        {
+          "name": "Per-SKU demand cap (upper bound)",
+          "lhs": "x_s  for each s in S",
+          "operator": "<=",
+          "rhs": "demand_cap_used[s]",
+          "used_parameters": [
+            "demand_cap_used[s]",
+            "x_s"
+          ],
+          "optional": false,
+          "notes": "Upper bound per SKU; demand_cap_used[s] is taken from Max_Market_Capacity if use_max_market_capacity_flag==true, otherwise from demand_forecast_cap or Previous_Quarter_Sales as fallback."
+        },
+        {
+          "name": "Nonnegativity and integrality",
+          "lhs": "x_s",
+          "operator": ">=",
+          "rhs": "0, integer if integrality_flag==true else continuous",
+          "used_parameters": [
+            "integrality_flag"
+          ],
+          "optional": false,
+          "notes": "x_s are nonnegative and integer by default; may be relaxed to continuous if needed for performance."
+        },
+        {
+          "name": "Optional supplier capacity (aggregate per supplier)",
+          "lhs": "for each k in K: sum_{s in S with Supplier_of_s[s]==k} x_s",
+          "operator": "<=",
+          "rhs": "supplier_capacity[k]",
+          "used_parameters": [
+            "Supplier_of_s[s]",
+            "supplier_capacity[k]",
+            "x_s"
+          ],
+          "optional": true,
+          "notes": "Enable only if supplier_capacity[k] values are supplied/valid. Default suggestion: supplier_capacity[k] = sum historical supplied units (Previous_Quarter_Sales for SKUs from k)."
+        },
+        {
+          "name": "Optional demand floor for high-rated SKUs",
+          "lhs": "for each s in S with Customer_Rating_Avg[s] >= rating_threshold_for_floor: x_s",
+          "operator": ">=",
+          "rhs": "demand_floor_fraction * Previous_Quarter_Sales[s]",
+          "used_parameters": [
+            "Customer_Rating_Avg[s]",
+            "rating_threshold_for_floor",
+            "demand_floor_fraction",
+            "Previous_Quarter_Sales[s]",
+            "x_s"
+          ],
+          "optional": true,
+          "notes": "If enabled (demand_floor_fraction>0) this enforces minimum production levels for highly-rated products."
+        }
+      ],
+      "integrality_and_scaling_comments": {
+        "integrality": "x_s are integer because SKUs are discrete physical units. For large aggregate volumes or when a fast LP is required, relaxing integrality (treat x_s as continuous) can be acceptable and provide a bound; rounding will be required for implementable solutions.",
+        "scaling": "Numerical scaling is mild here: profit coefficients are currency-per-unit (tens to hundreds), resource usage is minutes-per-unit (roughly 5-90). If solver numerical issues occur, normalize minutes to hours or scale profit to thousands. Also remove zero/negative-profit SKUs before solving (set x_s=0) to reduce problem size. Ensure all parameters are in consistent units (e.g., capacities and demand caps per same planning period)."
+      },
+      "expected_problem_size_and_solver_recommendation": {
+        "n_variables": "len(S) (e.g., 80)",
+        "n_constraints": "2 resource constraints + |S| demand-cap constraints (e.g., 82) + optional supplier constraints (|K|, ~4) + optional floors",
+        "density": "sparse (each constraint touches variables only where coefficients nonzero; resource constraints dense across S)",
+        "expected_solution_time": "Milliseconds to seconds for 80 integer variables with PuLP CBC; seconds if integrality enforced. Very small for LP relaxation.",
+        "solver_recommendation": "PuLP with CBC is suitable for this scale. For larger instances or speed/optimality guarantees, consider Gurobi or CPLEX (commercial). If integrality is relaxed, default LP solvers suffice."
+      },
+      "implementation_notes_for_coding_task": {
+        "CSV_columns_mapped": {
+          "Product_SKU": "index S",
+          "Sale_Price_Per_Unit": "Sale_Price_Per_Unit[s]",
+          "Material_Cost_Per_Unit": "Material_Cost_Per_Unit[s]",
+          "Molding_Mins_Req": "Molding_Mins_Req[s]",
+          "Assembly_Mins_Req": "Assembly_Mins_Req[s]",
+          "Previous_Quarter_Sales": "Previous_Quarter_Sales[s]",
+          "Max_Market_Capacity": "Max_Market_Capacity[s]",
+          "Customer_Rating_Avg": "Customer_Rating_Avg[s]",
+          "Supplier_ID": "Supplier_of_s[s]"
+        },
+        "default_computations": {
+          "molding_capacity_total_minutes": "sum_s Previous_Quarter_Sales[s] * Molding_Mins_Req[s]",
+          "assembly_capacity_total_minutes": "sum_s Previous_Quarter_Sales[s] * Assembly_Mins_Req[s]",
+          "demand_cap_used[s]": "Max_Market_Capacity[s] if use_max_market_capacity_flag else (demand_forecast_cap[s] if provided else Previous_Quarter_Sales[s])",
+          "profit_per_unit[s]": "Sale_Price_Per_Unit[s] - Material_Cost_Per_Unit[s] - molding_cost_per_min*Molding_Mins_Req[s] - assembly_cost_per_min*Assembly_Mins_Req[s]"
+        },
+        "preprocessing_recommendations": [
+          "Validate that Max_Market_Capacity and Previous_Quarter_Sales use the same time base. If not, set use_max_market_capacity_flag=false and provide demand_forecast_cap or use Previous_Quarter_Sales.",
+          "Remove SKUs with profit_per_unit <= 0 (or set explicit x_s = 0) unless there are non-financial reasons to produce them.",
+          "If integrality_flag==true but some SKUs have very large caps making integer solving heavy, consider solving LP relaxation then rounding only a few SKUs with small fractional values."
+        ]
+      }
+    },
+    "preprocessing": {
+      "column_to_parameter_mapping": {
+        "Product_SKU": "SKU string -> used for the set SKUs (skus list)",
+        "Sale_Price_Per_Unit": "price[s] (float)",
+        "Material_Cost_Per_Unit": "material_cost[s] (float)",
+        "Molding_Mins_Req": "molding_time_per_unit[s] (float, minutes per unit)",
+        "Assembly_Mins_Req": "assembly_time_per_unit[s] (float, minutes per unit)",
+        "Max_Market_Capacity": "demand_cap[s] (float, per planning period)",
+        "Previous_Quarter_Sales": "prev_sales[s] (int/float, historical units)",
+        "Supplier_ID": "supplier_of[s] (string -> supplier id)"
+      },
+      "python_code": "import pandas as pd\nfrom typing import Dict, List, Any, Optional\n\n# ------------------------------------------------------------------\n# CONFIG - user overrides and behavior flags\n# ------------------------------------------------------------------\ncsv_path: str = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv\"  # default path provided\n\n# If numeric_fill_missing == 'error' then missing numeric values raise an exception.\n# If 'fill_zero' missing numeric -> 0. If 'fill_mean' -> fill with column mean.\nnumeric_fill_missing: str = 'error'  # options: 'error', 'fill_zero', 'fill_mean'\n\n# Overrides for total capacities (minutes). If None, defaults are computed from historical usage.\nmolding_capacity_override: Optional[float] = None\nassembly_capacity_override: Optional[float] = None\n\n# If True use Max_Market_Capacity column as demand_cap. If False, use Previous_Quarter_Sales as fallback.\nuse_max_market_capacity_flag: bool = True\n\n# Optional user-supplied supplier_capacity overrides (dict supplier_id -> numeric). If None, computed from history.\nsupplier_capacity_override: Optional[Dict[str, float]] = None\n\n# How many sample SKUs to show in summary\n_SAMPLE_N = 5\n\n# ------------------------------------------------------------------\n# Implementation\n# ------------------------------------------------------------------\n\nREQUIRED_COLS = [\n    'Product_SKU',\n    'Sale_Price_Per_Unit',\n    'Material_Cost_Per_Unit',\n    'Molding_Mins_Req',\n    'Assembly_Mins_Req',\n    'Previous_Quarter_Sales',\n    'Max_Market_Capacity',\n    'Supplier_ID'\n]\n\n\ndef _ensure_columns_exist(df: pd.DataFrame, required_cols: List[str]):\n    missing = [c for c in required_cols if c not in df.columns]\n    if missing:\n        raise KeyError(f\"Missing required columns in CSV: {missing}\")\n\n\ndef _coerce_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:\n    s = pd.to_numeric(df[col], errors='coerce')\n    if s.isna().any():\n        if numeric_fill_missing == 'error':\n            idxs = list(df.index[s.isna()])\n            sample = df.loc[idxs[:5], ['Product_SKU', col]].to_dict(orient='records')\n            raise ValueError(\n                f\"Column '{col}' contains non-numeric or missing values at rows {idxs[:20]}. \"\n                f\"Sample of problematic rows: {sample}. Set numeric_fill_missing to 'fill_zero' or 'fill_mean' to auto-fill.\"\n            )\n        elif numeric_fill_missing == 'fill_zero':\n            s = s.fillna(0.0)\n        elif numeric_fill_missing == 'fill_mean':\n            mean_val = s.mean()\n            s = s.fillna(mean_val)\n        else:\n            raise ValueError(f\"Unknown numeric_fill_missing strategy: {numeric_fill_missing}\")\n    return s\n\n\ndef load_and_prepare(csv_path: str) -> Dict[str, Any]:\n    # Load\n    df = pd.read_csv(csv_path)\n\n    # Basic existence checks\n    _ensure_columns_exist(df, REQUIRED_COLS)\n\n    # Strip whitespace from string columns used as keys\n    df['Product_SKU'] = df['Product_SKU'].astype(str).str.strip()\n    df['Supplier_ID'] = df['Supplier_ID'].astype(str).str.strip()\n\n    # Coerce numeric fields\n    df['Sale_Price_Per_Unit'] = _coerce_numeric_column(df, 'Sale_Price_Per_Unit').astype(float)\n    df['Material_Cost_Per_Unit'] = _coerce_numeric_column(df, 'Material_Cost_Per_Unit').astype(float)\n    df['Molding_Mins_Req'] = _coerce_numeric_column(df, 'Molding_Mins_Req').astype(float)\n    df['Assembly_Mins_Req'] = _coerce_numeric_column(df, 'Assembly_Mins_Req').astype(float)\n    df['Previous_Quarter_Sales'] = _coerce_numeric_column(df, 'Previous_Quarter_Sales').astype(float)\n    df['Max_Market_Capacity'] = _coerce_numeric_column(df, 'Max_Market_Capacity').astype(float)\n\n    # Check SKU uniqueness (if duplicated SKUs are present, warn and aggregate or fail depending on policy)\n    if df['Product_SKU'].duplicated().any():\n        dup = df.loc[df['Product_SKU'].duplicated(keep=False), 'Product_SKU'].unique().tolist()\n        # For this preprocessing we will treat each row as a distinct item; if SKU duplicates exist it's likely the dataset encodes variants.\n        # We'll keep rows as-is but warn the user.\n        print(f\"Warning: duplicate Product_SKU values found for {len(dup)} SKU identifiers. Each row will be treated as a distinct model item. Duplicates: {dup[:10]}{('...' if len(dup)>10 else '')}\")\n\n    # Build SKUs list in the same order as the file\n    skus: List[str] = df['Product_SKU'].astype(str).tolist()\n\n    # Build parameter dicts (SKU -> value)\n    price: Dict[str, float] = dict(zip(skus, df['Sale_Price_Per_Unit'].astype(float).tolist()))\n    material_cost: Dict[str, float] = dict(zip(skus, df['Material_Cost_Per_Unit'].astype(float).tolist()))\n    molding_time: Dict[str, float] = dict(zip(skus, df['Molding_Mins_Req'].astype(float).tolist()))\n    assembly_time: Dict[str, float] = dict(zip(skus, df['Assembly_Mins_Req'].astype(float).tolist()))\n\n    # Demand cap: by default use Max_Market_Capacity if flag true, otherwise Previous_Quarter_Sales\n    if use_max_market_capacity_flag:\n        demand_cap_values = df['Max_Market_Capacity'].astype(float)\n    else:\n        demand_cap_values = df['Previous_Quarter_Sales'].astype(float)\n    demand_cap: Dict[str, float] = dict(zip(skus, demand_cap_values.tolist()))\n\n    prev_sales: Dict[str, float] = dict(zip(skus, df['Previous_Quarter_Sales'].astype(float).tolist()))\n    supplier_of: Dict[str, str] = dict(zip(skus, df['Supplier_ID'].astype(str).tolist()))\n\n    # Derived: profit per unit (simple version: price - material cost)\n    profit_per_unit: Dict[str, float] = {}\n    for s in skus:\n        profit_per_unit[s] = float(price[s] - material_cost[s])\n\n    # Default total capacities (minutes) using formula: sum(prev_sales * time_per_unit)\n    total_molding_capacity_default = float((df['Previous_Quarter_Sales'] * df['Molding_Mins_Req']).sum())\n    total_assembly_capacity_default = float((df['Previous_Quarter_Sales'] * df['Assembly_Mins_Req']).sum())\n\n    # Apply overrides if provided\n    total_molding_capacity = float(molding_capacity_override) if molding_capacity_override is not None else total_molding_capacity_default\n    total_assembly_capacity = float(assembly_capacity_override) if assembly_capacity_override is not None else total_assembly_capacity_default\n\n    # Supplier capacities: default = sum(prev_sales for SKUs of that supplier)\n    supplier_capacity_series = df.groupby('Supplier_ID')['Previous_Quarter_Sales'].sum()\n    supplier_capacity: Dict[str, float] = supplier_capacity_series.astype(float).to_dict()\n    # apply supplier overrides if provided\n    if supplier_capacity_override is not None:\n        for k, v in supplier_capacity_override.items():\n            supplier_capacity[str(k)] = float(v)\n\n    # Final model-parameter dict to return (suitable to feed into PuLP)\n    model_params = {\n        'skus': skus,\n        'price': price,\n        'material_cost': material_cost,\n        'molding_time': molding_time,\n        'assembly_time': assembly_time,\n        'demand_cap': demand_cap,\n        'prev_sales': prev_sales,\n        'supplier_of': supplier_of,\n        'profit_per_unit': profit_per_unit,\n        'total_molding_capacity': total_molding_capacity,\n        'total_assembly_capacity': total_assembly_capacity,\n        'supplier_capacity': supplier_capacity,\n        # extras for traceability\n        '_internal': {\n            'total_molding_capacity_default': total_molding_capacity_default,\n            'total_assembly_capacity_default': total_assembly_capacity_default,\n            'use_max_market_capacity_flag': use_max_market_capacity_flag,\n            'numeric_fill_missing': numeric_fill_missing,\n            'row_count': len(df)\n        }\n    }\n\n    # Print summary\n    print('\\n--- Preprocessing summary ---')\n    print(f\"Rows read: {len(df)}\")\n    print(f\"Number of SKUs (items): {len(skus)}\")\n    print(f\"Total default molding capacity (minutes) computed from history: {total_molding_capacity_default:.2f}\")\n    print(f\"Total default assembly capacity (minutes) computed from history: {total_assembly_capacity_default:.2f}\")\n    if molding_capacity_override is not None:\n        print(f\"Molding capacity override applied: {total_molding_capacity:.2f}\")\n    if assembly_capacity_override is not None:\n        print(f\"Assembly capacity override applied: {total_assembly_capacity:.2f}\")\n    print(f\"Number of suppliers (unique): {df['Supplier_ID'].nunique()}\")\n\n    # Show a small sample of parameter dicts\n    sample_skus = skus[:_SAMPLE_N]\n    print('\\nSample (first {} SKUs):'.format(len(sample_skus)))\n    for s in sample_skus:\n        print(f\" SKU: {s} | price={price[s]:.2f} | mat_cost={material_cost[s]:.2f} | profit={profit_per_unit[s]:.2f} | molding_min={molding_time[s]:.2f} | assembly_min={assembly_time[s]:.2f} | demand_cap={demand_cap[s]:.1f} | prev_sales={prev_sales[s]:.1f} | supplier={supplier_of[s]}\")\n\n    print('\\nSample supplier capacities (up to 5):')\n    for k, v in list(supplier_capacity.items())[:5]:\n        print(f\" supplier: {k} -> capacity (default historical) = {v:.1f}\")\n\n    print('--- End summary ---\\n')\n\n    # Also assign to top-level names for interactive use (optional)\n    globals().update(model_params)\n\n    return model_params\n\n\n# If the script is executed directly, run the loader and produce model_params\nif __name__ == '__main__':\n    params = load_and_prepare(csv_path)\n    # params now contains the required dicts for the MILP: skus, price, material_cost, molding_time,\n    # assembly_time, demand_cap, prev_sales, supplier_of, profit_per_unit, total_molding_capacity,\n    # total_assembly_capacity, supplier_capacity\n"
+    },
+    "scripting": {
+      "code": "\"\"\"\nProduct-mix MILP solver using PuLP.\n- Loads CSV at configured path\n- Preprocesses and validates columns\n- Builds MILP to maximize contribution margin (price - material cost)\n- Respects molding and assembly capacity (defaults from history or overrides)\n- Optionally enforces supplier aggregate capacities\n- Prints solver status, objective value, and decision variable values\n\nThis script is self-contained. Edit the CONFIG section below to change behavior.\n\"\"\"\n\nimport re\nimport math\nimport sys\nfrom typing import Dict, List, Any, Optional\nimport numpy as np\nimport pandas as pd\nimport pulp\n\n# ------------------------------------------------------------------\n# CONFIG - user overrides and behavior flags\n# ------------------------------------------------------------------\n# CSV path (provided)\nCSV_PATH: str = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpm5dji2ux.csv\"\n\n# Numeric missing value handling: 'error', 'fill_zero', 'fill_mean'\nnumeric_fill_missing: str = 'error'\n\n# If True use Max_Market_Capacity column as demand_cap. If False, use Previous_Quarter_Sales as fallback.\nuse_max_market_capacity_flag: bool = True\n\n# Overrides for total capacities (minutes). If None, defaults are computed from historical usage.\nmolding_capacity_override: Optional[float] = None\nassembly_capacity_override: Optional[float] = None\n\n# Optional supplier capacity constraints: set to True to enable them. Default False.\nAPPLY_SUPPLIER_CAPACITY: bool = False\n# If enabled, you can also supply a dict override mapping supplier_id -> capacity (units)\nsupplier_capacity_override: Optional[Dict[str, float]] = None\n\n# Integrality: if True variables are Integer. If False they are Continuous (LP relaxation)\nINTEGRAL_VARS: bool = True\n\n# Solver selection: None uses default pulp solver (CBC). To pass a solver instance, set below.\nPULP_SOLVER = None\n\n# How many sample SKUs to show in preprocessing summary\n_SAMPLE_N = 5\n\n# ------------------------------------------------------------------\n# Constants / required columns\n# ------------------------------------------------------------------\nREQUIRED_COLS = [\n    'Product_SKU',\n    'Sale_Price_Per_Unit',\n    'Material_Cost_Per_Unit',\n    'Molding_Mins_Req',\n    'Assembly_Mins_Req',\n    'Previous_Quarter_Sales',\n    'Max_Market_Capacity',\n    'Supplier_ID'\n]\n\n# ------------------------------------------------------------------\n# Helper utilities\n# ------------------------------------------------------------------\n\ndef safe_name(s: Any, max_len: int = 64) -> str:\n    \"\"\"Return a sanitized identifier suitable for variable/constraint names.\n    Keeps alphanumeric and underscores, replaces others with '_', truncates to max_len.\n    Ensures the first character is a letter or underscore by prefixing 'v_' if needed.\n    \"\"\"\n    s_str = str(s)\n    name = re.sub(r'[^0-9a-zA-Z_]', '_', s_str)\n    if len(name) > max_len:\n        name = name[:max_len]\n    if not re.match(r'^[A-Za-z_]', name):\n        name = 'v_' + name\n    return name\n\n\ndef _ensure_columns_exist(df: pd.DataFrame, required_cols: List[str]):\n    missing = [c for c in required_cols if c not in df.columns]\n    if missing:\n        raise KeyError(f\"Missing required columns in CSV: {missing}\")\n\n\ndef _coerce_numeric_column(df: pd.DataFrame, col: str) -> pd.Series:\n    s = pd.to_numeric(df[col], errors='coerce')\n    if s.isna().any():\n        if numeric_fill_missing == 'error':\n            idxs = list(df.index[s.isna()])\n            sample = df.loc[idxs[:5], ['Product_SKU', col]].to_dict(orient='records')\n            raise ValueError(\n                f\"Column '{col}' contains non-numeric or missing values at rows {idxs[:20]}. \"\n                f\"Sample of problematic rows: {sample}. Set numeric_fill_missing to 'fill_zero' or 'fill_mean' to auto-fill.\"\n            )\n        elif numeric_fill_missing == 'fill_zero':\n            s = s.fillna(0.0)\n        elif numeric_fill_missing == 'fill_mean':\n            mean_val = s.mean()\n            s = s.fillna(mean_val)\n        else:\n            raise ValueError(f\"Unknown numeric_fill_missing strategy: {numeric_fill_missing}\")\n    # Validate finite\n    if not np.isfinite(s).all():\n        bad_idx = df.index[~np.isfinite(s)].tolist()\n        raise ValueError(f\"Column '{col}' contains non-finite values at rows {bad_idx[:20]}\")\n    return s\n\n# ------------------------------------------------------------------\n# Preprocessing: load CSV, validate, build model parameters\n# ------------------------------------------------------------------\n\ndef load_and_prepare(csv_path: str) -> Dict[str, Any]:\n    df = pd.read_csv(csv_path)\n\n    _ensure_columns_exist(df, REQUIRED_COLS)\n\n    # Strip whitespace and ensure strings\n    df['Product_SKU'] = df['Product_SKU'].astype(str).str.strip()\n    df['Supplier_ID'] = df['Supplier_ID'].astype(str).str.strip()\n\n    # Coerce numeric fields\n    df['Sale_Price_Per_Unit'] = _coerce_numeric_column(df, 'Sale_Price_Per_Unit').astype(float)\n    df['Material_Cost_Per_Unit'] = _coerce_numeric_column(df, 'Material_Cost_Per_Unit').astype(float)\n    df['Molding_Mins_Req'] = _coerce_numeric_column(df, 'Molding_Mins_Req').astype(float)\n    df['Assembly_Mins_Req'] = _coerce_numeric_column(df, 'Assembly_Mins_Req').astype(float)\n    df['Previous_Quarter_Sales'] = _coerce_numeric_column(df, 'Previous_Quarter_Sales').astype(float)\n    df['Max_Market_Capacity'] = _coerce_numeric_column(df, 'Max_Market_Capacity').astype(float)\n\n    # Use the DataFrame row index to create unique item identifiers so duplicate Product_SKU rows are treated separately\n    df = df.reset_index(drop=False).rename(columns={'index': 'row_index'})\n    # item_id uses row index to be unique: <Product_SKU>__r<row_index>\n    df['item_id'] = df.apply(lambda r: f\"{r['Product_SKU']}__r{int(r['row_index'])}\", axis=1)\n\n    # Prepare lists and dicts\n    item_ids: List[str] = df['item_id'].astype(str).tolist()\n    if len(item_ids) == 0:\n        raise ValueError('No SKUs found in CSV; exiting.')\n\n    # Mapping from item_id back to original Product_SKU for reporting\n    original_sku: Dict[str, str] = dict(zip(item_ids, df['Product_SKU'].astype(str).tolist()))\n\n    price: Dict[str, float] = dict(zip(item_ids, df['Sale_Price_Per_Unit'].astype(float).tolist()))\n    material_cost: Dict[str, float] = dict(zip(item_ids, df['Material_Cost_Per_Unit'].astype(float).tolist()))\n    molding_time: Dict[str, float] = dict(zip(item_ids, df['Molding_Mins_Req'].astype(float).tolist()))\n    assembly_time: Dict[str, float] = dict(zip(item_ids, df['Assembly_Mins_Req'].astype(float).tolist()))\n\n    if use_max_market_capacity_flag:\n        demand_cap_values = df['Max_Market_Capacity'].astype(float)\n    else:\n        demand_cap_values = df['Previous_Quarter_Sales'].astype(float)\n    demand_cap: Dict[str, float] = dict(zip(item_ids, demand_cap_values.tolist()))\n\n    prev_sales: Dict[str, float] = dict(zip(item_ids, df['Previous_Quarter_Sales'].astype(float).tolist()))\n    supplier_of: Dict[str, str] = dict(zip(item_ids, df['Supplier_ID'].astype(str).tolist()))\n\n    # Derived: profit per unit (price - material cost). Users can add per-minute labor cost later if desired.\n    profit_per_unit: Dict[str, float] = {}\n    for i in item_ids:\n        profit_per_unit[i] = float(price[i] - material_cost[i])\n\n    # Default total capacities (minutes) using formula: sum(prev_sales * time_per_unit)\n    total_molding_capacity_default = float((df['Previous_Quarter_Sales'] * df['Molding_Mins_Req']).sum())\n    total_assembly_capacity_default = float((df['Previous_Quarter_Sales'] * df['Assembly_Mins_Req']).sum())\n\n    # Apply overrides if provided (validate non-negative)\n    if molding_capacity_override is not None:\n        if not np.isfinite(molding_capacity_override) or molding_capacity_override < 0:\n            raise ValueError('molding_capacity_override must be a non-negative finite number or None')\n        total_molding_capacity = float(molding_capacity_override)\n    else:\n        total_molding_capacity = total_molding_capacity_default\n\n    if assembly_capacity_override is not None:\n        if not np.isfinite(assembly_capacity_override) or assembly_capacity_override < 0:\n            raise ValueError('assembly_capacity_override must be a non-negative finite number or None')\n        total_assembly_capacity = float(assembly_capacity_override)\n    else:\n        total_assembly_capacity = total_assembly_capacity_default\n\n    # Supplier capacities default: sum(prev_sales) per supplier\n    supplier_capacity_series = df.groupby('Supplier_ID')['Previous_Quarter_Sales'].sum()\n    supplier_capacity: Dict[str, float] = supplier_capacity_series.astype(float).to_dict()\n    if supplier_capacity_override is not None:\n        for k, v in supplier_capacity_override.items():\n            if not np.isfinite(v) or v < 0:\n                raise ValueError('supplier_capacity_override values must be non-negative finite')\n            supplier_capacity[str(k)] = float(v)\n\n    # Validate demand caps are finite; if not, coerce to zero with a warning\n    for i in item_ids:\n        cap = demand_cap.get(i, 0.0)\n        if not np.isfinite(cap) or cap < 0:\n            print(f\"Warning: demand cap for item {i} (SKU {original_sku[i]}) is invalid ({cap}); setting to 0.\")\n            demand_cap[i] = 0.0\n\n    # Final model-parameter dict to return\n    model_params = {\n        'item_ids': item_ids,\n        'original_sku': original_sku,\n        'price': price,\n        'material_cost': material_cost,\n        'molding_time': molding_time,\n        'assembly_time': assembly_time,\n        'demand_cap': demand_cap,\n        'prev_sales': prev_sales,\n        'supplier_of': supplier_of,\n        'profit_per_unit': profit_per_unit,\n        'total_molding_capacity': total_molding_capacity,\n        'total_assembly_capacity': total_assembly_capacity,\n        'supplier_capacity': supplier_capacity,\n        '_internal': {\n            'total_molding_capacity_default': total_molding_capacity_default,\n            'total_assembly_capacity_default': total_assembly_capacity_default,\n            'use_max_market_capacity_flag': use_max_market_capacity_flag,\n            'numeric_fill_missing': numeric_fill_missing,\n            'row_count': len(df)\n        }\n    }\n\n    # Print preprocessing summary\n    print('\\n--- Preprocessing summary ---')\n    print(f\"Rows read: {len(df)}\")\n    print(f\"Number of model items (rows treated as distinct): {len(item_ids)}\")\n    print(f\"Total default molding capacity (minutes) computed from history: {total_molding_capacity_default:.2f}\")\n    print(f\"Total default assembly capacity (minutes) computed from history: {total_assembly_capacity_default:.2f}\")\n    if molding_capacity_override is not None:\n        print(f\"Molding capacity override applied: {total_molding_capacity:.2f}\")\n    if assembly_capacity_override is not None:\n        print(f\"Assembly capacity override applied: {total_assembly_capacity:.2f}\")\n    print(f\"Number of suppliers (unique): {df['Supplier_ID'].nunique()}\")\n\n    sample_items = item_ids[:_SAMPLE_N]\n    print('\\nSample (first {} items):'.format(len(sample_items)))\n    for itm in sample_items:\n        print(f\" item_id: {itm} | SKU={original_sku[itm]} | price={price[itm]:.2f} | mat_cost={material_cost[itm]:.2f} | profit={profit_per_unit[itm]:.2f} | molding_min={molding_time[itm]:.2f} | assembly_min={assembly_time[itm]:.2f} | demand_cap={demand_cap[itm]:.1f} | prev_sales={prev_sales[itm]:.1f} | supplier={supplier_of[itm]}\")\n\n    print('\\nSample supplier capacities (up to 5):')\n    for k, v in list(supplier_capacity.items())[:5]:\n        print(f\" supplier: {k} -> capacity (default historical) = {v:.1f}\")\n\n    print('--- End summary ---\\n')\n\n    return model_params\n\n# ------------------------------------------------------------------\n# Build and solve MILP using PuLP\n# ------------------------------------------------------------------\n\ndef build_and_solve(params: Dict[str, Any]) -> Dict[str, Any]:\n    item_ids: List[str] = params['item_ids']\n    original_sku: Dict[str, str] = params['original_sku']\n    price: Dict[str, float] = params['price']\n    material_cost: Dict[str, float] = params['material_cost']\n    molding_time: Dict[str, float] = params['molding_time']\n    assembly_time: Dict[str, float] = params['assembly_time']\n    demand_cap: Dict[str, float] = params['demand_cap']\n    profit_per_unit: Dict[str, float] = params['profit_per_unit']\n    total_molding_capacity: float = params['total_molding_capacity']\n    total_assembly_capacity: float = params['total_assembly_capacity']\n    supplier_of: Dict[str, str] = params['supplier_of']\n    supplier_capacity: Dict[str, float] = params['supplier_capacity']\n\n    # Create the problem (maximize total profit)\n    prob = pulp.LpProblem('Product_Mix_MaxProfit', pulp.LpMaximize)\n\n    # Decision variables: integer or continuous non-negative units for each item\n    x_vars: Dict[str, pulp.LpVariable] = {}\n    used_safe_names = set()\n    for s in item_ids:\n        ub_raw = float(demand_cap.get(s, 0.0))\n        # Handle non-finite or negative values\n        if not np.isfinite(ub_raw) or ub_raw <= 0:\n            ub_int = 0\n        else:\n            # Choose to floor fractional caps to respect integrality\n            ub_int = max(0, int(math.floor(ub_raw + 1e-9)))\n            if abs(ub_raw - ub_int) > 1e-6:\n                print(f\"Note: demand cap for item '{s}' (SKU {original_sku[s]}) is fractional ({ub_raw}); using floored integer upper bound {ub_int} to respect integrality.\")\n        # Build a unique safe variable name\n        base_safe = safe_name(s, max_len=48)\n        safe = base_safe\n        counter = 1\n        while safe in used_safe_names:\n            safe = f\"{base_safe}_{counter}\"\n            counter += 1\n        used_safe_names.add(safe)\n\n        var_name = f\"x_{safe}\"\n        category = 'Integer' if INTEGRAL_VARS else 'Continuous'\n        # Create variable with integer upper bound ub_int (0 allowed)\n        x_vars[s] = pulp.LpVariable(var_name, lowBound=0, upBound=ub_int, cat=category)\n\n    # Objective: maximize sum profit_per_unit[s] * x[s]\n    prob += pulp.lpSum([profit_per_unit[s] * x_vars[s] for s in item_ids]), 'Total_Profit'\n\n    # Molding capacity constraint\n    if not np.isfinite(total_molding_capacity) or total_molding_capacity < 0:\n        raise ValueError('Computed total_molding_capacity must be finite and >= 0')\n    prob += pulp.lpSum([molding_time[s] * x_vars[s] for s in item_ids]) <= float(total_molding_capacity), 'Molding_Capacity'\n\n    # Assembly capacity constraint\n    if not np.isfinite(total_assembly_capacity) or total_assembly_capacity < 0:\n        raise ValueError('Computed total_assembly_capacity must be finite and >= 0')\n    prob += pulp.lpSum([assembly_time[s] * x_vars[s] for s in item_ids]) <= float(total_assembly_capacity), 'Assembly_Capacity'\n\n    # Per-item demand caps already enforced by variable upper bounds\n\n    # Optional: supplier capacity aggregation\n    if APPLY_SUPPLIER_CAPACITY:\n        supplier_to_items: Dict[str, List[str]] = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n\n        for sup, s_list in supplier_to_items.items():\n            sup_cap_raw = supplier_capacity.get(sup, 0.0)\n            if not np.isfinite(sup_cap_raw) or sup_cap_raw <= 0:\n                sup_cap_int = 0\n            else:\n                sup_cap_int = max(0, int(math.floor(float(sup_cap_raw) + 1e-9)))\n                if abs(sup_cap_raw - sup_cap_int) > 1e-6:\n                    print(f\"Note: supplier capacity for '{sup}' is fractional ({sup_cap_raw}); using floored integer {sup_cap_int}.\")\n            cname = f\"SupplierCap_{safe_name(sup, max_len=48)}\"\n            prob += pulp.lpSum([x_vars[s] for s in s_list]) <= sup_cap_int, cname\n\n    # Solve\n    if PULP_SOLVER is None:\n        res = prob.solve()\n    else:\n        res = prob.solve(PULP_SOLVER)\n\n    status_str = pulp.LpStatus.get(prob.status, 'UNKNOWN')\n    print(f\"\\nSolver status: {status_str} (internal code {prob.status})\")\n\n    # Extract solution values\n    produced: Dict[str, int] = {}\n    for s in item_ids:\n        val = pulp.value(x_vars[s])\n        if val is None:\n            val_num = 0\n        else:\n            # Round to nearest integer (should already be integer if integrality enforced)\n            val_num = int(round(float(val)))\n        produced[s] = val_num\n\n    total_profit = float(pulp.value(prob.objective) if pulp.value(prob.objective) is not None else 0.0)\n    total_units = sum(produced.values())\n    used_molding = sum(molding_time[s] * produced[s] for s in item_ids)\n    used_assembly = sum(assembly_time[s] * produced[s] for s in item_ids)\n\n    molding_util_pct = (used_molding / total_molding_capacity * 100.0) if total_molding_capacity > 0 else float('nan')\n    assembly_util_pct = (used_assembly / total_assembly_capacity * 100.0) if total_assembly_capacity > 0 else float('nan')\n\n    # Print summary with required outputs\n    print('\\n--- Optimization results summary ---')\n    print(f\"Total profit (objective): {total_profit:.2f}\")\n    print(f\"Total units produced: {total_units}\")\n    print(f\"Molding used: {used_molding:.2f} / {total_molding_capacity:.2f} minutes ({molding_util_pct:.1f}%)\")\n    print(f\"Assembly used: {used_assembly:.2f} / {total_assembly_capacity:.2f} minutes ({assembly_util_pct:.1f}%)\")\n    print(f\"Integrality enforced: {INTEGRAL_VARS}\")\n    if APPLY_SUPPLIER_CAPACITY:\n        print('Supplier capacities were enforced.')\n    else:\n        print('Supplier capacities were NOT enforced (APPLY_SUPPLIER_CAPACITY=False).')\n\n    # Print solver full status and objective\n    print('\\nDecision variables (item_id, original_SKU, produced_units, profit_per_unit, demand_cap):')\n    print('item_id,original_SKU,produced_units,profit_per_unit,demand_cap')\n    for s in item_ids:\n        cap = float(demand_cap.get(s, 0.0))\n        pct = (produced[s] / cap * 100.0) if cap > 0 else 0.0\n        print(f\"{s},{original_sku[s]},{produced[s]},{profit_per_unit.get(s,0.0):.2f},{cap:.1f} (fulfilled {pct:.1f}%)\")\n\n    # If supplier capacities were enforced, print summary\n    if APPLY_SUPPLIER_CAPACITY:\n        print('\\nSupplier,capacity,units_assigned,percent_utilized')\n        supplier_to_items = {}\n        for s in item_ids:\n            sup = supplier_of.get(s, 'UNKNOWN')\n            supplier_to_items.setdefault(sup, []).append(s)\n        for sup, s_list in supplier_to_items.items():\n            cap_raw = supplier_capacity.get(sup, 0.0)\n            assigned = sum(produced[s] for s in s_list)\n            cap_int = max(0, int(math.floor(float(cap_raw) + 1e-9))) if np.isfinite(cap_raw) else 0\n            pct = (assigned / cap_int * 100.0) if cap_int > 0 else 0.0\n            print(f\"{sup},{cap_int},{assigned},{pct:.1f}\")\n\n    print('\\n--- End of results ---')\n\n    return {\n        'status': status_str,\n        'total_profit': total_profit,\n        'total_units': total_units,\n        'used_molding': used_molding,\n        'used_assembly': used_assembly,\n        'produced': produced,\n        'params_snapshot': {\n            'total_molding_capacity': total_molding_capacity,\n            'total_assembly_capacity': total_assembly_capacity,\n            'integral_vars': INTEGRAL_VARS,\n            'apply_supplier_capacity': APPLY_SUPPLIER_CAPACITY\n        }\n    }\n\n# ------------------------------------------------------------------\n# Main execution\n# ------------------------------------------------------------------\nif __name__ == '__main__':\n    try:\n        params = load_and_prepare(CSV_PATH)\n    except Exception as e:\n        print(f\"Error during preprocessing: {e}\")\n        sys.exit(1)\n\n    try:\n        results = build_and_solve(params)\n    except Exception as e:\n        print(f\"Error during model building/solving: {e}\")\n        sys.exit(1)\n\n    # Script ends here. Results already printed.\n",
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "total_profit": {
+            "type": "number"
+          },
+          "total_units": {
+            "type": "integer"
+          },
+          "used_molding": {
+            "type": "number"
+          },
+          "used_assembly": {
+            "type": "number"
+          },
+          "produced": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "status",
+          "total_profit",
+          "produced"
+        ]
+      },
+      "successful_implementation": true
+    }
+  }
+}

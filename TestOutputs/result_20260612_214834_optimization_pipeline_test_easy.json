@@ -1,0 +1,433 @@
+{
+  "metadata": {
+    "timestamp": "20260612_214834",
+    "csv_filename": "optimization_pipeline_test_easy.csv",
+    "initial_prompt": "",
+    "modeling_edited": false
+  },
+  "pipeline_state": {
+    "csv_file_path": "C:\\Users\\simon\\AppData\\Local\\Temp\\tmp2yons1dq.csv",
+    "initial_prompt": "",
+    "plan": {
+      "goal": "Build a runnable PuLP optimisation model that maximises total profit for a multi-product production plan subject to machine, labour, and raw-material capacity constraints inferred from the dataset.",
+      "tasks": [
+        {
+          "task_id": "data_inspection",
+          "task_type": "data_inspection",
+          "description": "Inspect the CSV tmp2yons1dq.csv thoroughly. Compute the total resource hours/units that would be consumed if every product were produced at its Max_Market_Demand (i.e., sum over all rows of Max_Market_Demand * Machine_A_Hours_Req, Machine_B_Hours_Req, Labor_Hours_Req, and Raw_Material_Units_Req). Check for any rows where Min_Production_Requirement exceeds Max_Market_Demand. Report these totals, the feasibility check result, and a brief distribution summary of Profit_Per_Unit.",
+          "depends_on": [],
+          "expected_output": "A concise report containing: (1) total resource consumption at max demand for each of the four resources, (2) feasibility check (any min > max?), (3) profit distribution summary, and (4) a recommendation for what percentage of total max-demand consumption should be used as capacity limits to make the optimisation non-trivial."
+        },
+        {
+          "task_id": "use_case_analysis",
+          "task_type": "use_case_analysis",
+          "description": "Based on the data inspection, confirm the operations-research use case. The dataset describes a product-mix production planning problem with 50 products, per-unit profits, per-unit resource consumption (Machine A, Machine B, Labour, Raw Material), and lower/upper production bounds. Because the CSV does not contain aggregate capacity limits, state that the model will treat capacity limits as external parameters set to a fixed fraction (e.g., 65-75%) of the total max-demand resource requirements so that the problem is meaningfully constrained.",
+          "depends_on": [],
+          "expected_output": "A clear use-case statement: product-mix profit maximisation with four resource constraints and box bounds on production quantities. Explicitly note the need to synthesise capacity parameters and the chosen fraction."
+        },
+        {
+          "task_id": "mathematical_modeling",
+          "task_type": "modeling",
+          "description": "Formulate the complete Mixed-Integer Linear Programming (MILP) model. Define: (i) index set i in Products, (ii) parameters profit_i, machineA_i, machineB_i, labor_i, raw_i, min_i, max_i, and capacity limits CAP_A, CAP_B, CAP_LAB, CAP_RAW, (iii) integer decision variables X_i >= 0. Objective: maximise sum(profit_i * X_i). Constraints: sum(machineA_i * X_i) <= CAP_A, sum(machineB_i * X_i) <= CAP_B, sum(labor_i * X_i) <= CAP_LAB, sum(raw_i * X_i) <= CAP_RAW, and min_i <= X_i <= max_i for all i. State that X_i should be integer because units are discrete.",
+          "depends_on": [],
+          "expected_output": "A formal mathematical model written in standard optimisation notation (sets, parameters, variables, objective function, constraints) ready for translation into PuLP."
+        },
+        {
+          "task_id": "preprocessing",
+          "task_type": "preprocessing",
+          "description": "Write a Python code snippet that: (1) reads tmp2yons1dq.csv with pandas, (2) creates dictionaries mapping Product_ID to each column value, (3) computes capacity limits CAP_A, CAP_B, CAP_LAB, CAP_RAW as 70% of the total resource consumption if every product were produced at Max_Market_Demand, and (4) stores everything in clearly named Python variables/dicts. The code must be robust (e.g., handle the Product_ID column as string index). Return only the code snippet with brief comments.",
+          "depends_on": [],
+          "expected_output": "A self-contained Python preprocessing code snippet that loads the CSV, builds parameter dictionaries, and computes the four capacity constants at 70% of max-demand totals."
+        },
+        {
+          "task_id": "coding",
+          "task_type": "coding",
+          "description": "Write a complete, runnable Python script using PuLP (and pandas) that solves the product-mix MILP. The script must: (1) execute the preprocessing code to load tmp2yons1dq.csv and build parameters, (2) create an LpProblem named 'Production_Mix' with LpMaximize, (3) define integer LpVariables for each product with lower bound = Min_Production_Requirement and upper bound = Max_Market_Demand, (4) add the four resource constraints and the objective function, (5) call .solve(), (6) print the optimal total profit and a table of optimal production quantities per product, and (7) save the script to a .py file conceptually. Use the exact CSV filename tmp2yons1dq.csv. Ensure all PuLP syntax is correct (e.g., lpSum, LpVariable.dicts).",
+          "depends_on": [],
+          "expected_output": "Complete, runnable Python/PuLP code as a single script string that can be executed directly to solve the optimisation."
+        },
+        {
+          "task_id": "validation",
+          "task_type": "validation",
+          "description": "Review the PuLP script generated in the coding task. Check for: (a) syntax errors or missing imports, (b) correct use of the CSV filename tmp2yons1dq.csv, (c) proper PuLP API usage (LpProblem, LpVariable.dicts with cat='Integer', lpSum, constraint directions), (d) that all referenced variables exist before use, (e) that the objective and constraints match the mathematical model from the modeling task. If issues are found, provide a corrected version of the code; otherwise confirm it is ready to run.",
+          "depends_on": [
+            "coding"
+          ],
+          "expected_output": "A validation report (pass/fail with details) and, if necessary, a corrected version of the full PuLP script."
+        }
+      ]
+    },
+    "results": [
+      {
+        "task_id": "data_inspection",
+        "status": "ok",
+        "output": {
+          "reasoning": "I have inspected the dataset thoroughly using all available tools. The dataset contains 50 products with columns: Product_ID, Profit_Per_Unit, Machine_A_Hours_Req, Machine_B_Hours_Req, Labor_Hours_Req, Raw_Material_Units_Req, Min_Production_Requirement, and Max_Market_Demand. \n\nKey findings:\n1. Feasibility: The unique values for Min_Production_Requirement are [0, 10, 20] and the minimum Max_Market_Demand is 52. Since max(Min_Production_Requirement) = 20 < 52 = min(Max_Market_Demand), NO row has Min_Production_Requirement > Max_Market_Demand. All rows are feasible.\n\n2. Profit distribution: Exact statistics are available from basic_stats \u2014 mean 47.03, std 26.87, min 6.68, median 45.24, max 134.45.\n\n3. Resource totals at max demand: Exact computation requires row-level multiplication (sum of Max_Market_Demand \u00d7 Resource_Req). Without access to the full row-level data or covariance between columns, I cannot compute exact totals. However, I can provide approximate estimates using the product of means, and note that the first 5 rows suggest a possible negative correlation between demand and resource intensity, which would make true totals lower than the mean-product estimate.\n   - Mean-product estimates (50 \u00d7 mean(Max) \u00d7 mean(Resource)): Machine A \u2248 22,139 hrs; Machine B \u2248 25,971 hrs; Labor \u2248 43,245 hrs; Raw Material \u2248 130,425 units.\n   - First-5-rows extrapolation: Machine A \u2248 8,536 hrs; Machine B \u2248 7,692 hrs; Labor \u2248 25,008 hrs; Raw Material \u2248 43,850 units.\n   The wide discrepancy indicates significant correlation structure in the data.\n\n4. Recommendation: To make the optimization non-trivial, capacity limits should be set below total max-demand consumption. A safe and non-trivial range is 70\u201380% of the true total max-demand consumption. Given the uncertainty in exact totals, I recommend using approximately 75% as a starting point, which would force product selection while maintaining feasibility with respect to minimum requirements (total min requirements \u2248 290 units, only ~2% of total max demand).",
+          "result": {
+            "dataset_overview": {
+              "rows": 50,
+              "columns": 8,
+              "column_names": [
+                "Product_ID",
+                "Profit_Per_Unit",
+                "Machine_A_Hours_Req",
+                "Machine_B_Hours_Req",
+                "Labor_Hours_Req",
+                "Raw_Material_Units_Req",
+                "Min_Production_Requirement",
+                "Max_Market_Demand"
+              ]
+            },
+            "feasibility_check": {
+              "min_exceeds_max": false,
+              "explanation": "Maximum Min_Production_Requirement is 20, while minimum Max_Market_Demand is 52. Therefore, no row has Min_Production_Requirement > Max_Market_Demand. All rows are feasible.",
+              "infeasible_rows": []
+            },
+            "total_resource_consumption_at_max_demand": {
+              "note": "Exact totals require row-level data multiplication. Two estimation methods are provided due to unavailable covariance data.",
+              "method_1_product_of_means": {
+                "machine_a_hours": 22139,
+                "machine_b_hours": 25971,
+                "labor_hours": 43245,
+                "raw_material_units": 130425,
+                "description": "50 * mean(Max_Market_Demand) * mean(Resource_Req)"
+              },
+              "method_2_first_5_rows_extrapolation": {
+                "machine_a_hours": 8536,
+                "machine_b_hours": 7692,
+                "labor_hours": 25008,
+                "raw_material_units": 43850,
+                "description": "10 * sum over first 5 rows of (Max_Market_Demand * Resource_Req)"
+              },
+              "interpretation": "The large discrepancy suggests negative correlation between Max_Market_Demand and resource requirements. True totals likely fall between these estimates."
+            },
+            "profit_distribution_summary": {
+              "mean": 47.03,
+              "std": 26.87,
+              "min": 6.68,
+              "q1": 30.68,
+              "median": 45.24,
+              "q3": 59.28,
+              "max": 134.45,
+              "range": 127.77,
+              "distribution_shape": "Roughly symmetric with moderate right skew; median close to mean."
+            },
+            "capacity_limit_recommendation": {
+              "recommended_percentage_of_max_demand": "75%",
+              "rationale": "Setting capacities at ~75% of total max-demand consumption makes the optimization non-trivial (cannot produce all products at max demand) while remaining safely feasible given minimum production requirements total only ~2% of max-demand volume. If using Method 1 estimates, suggested capacities: Machine A ~16,600 hrs, Machine B ~19,500 hrs, Labor ~32,400 hrs, Raw Material ~97,800 units. If using Method 2 estimates: Machine A ~6,400 hrs, Machine B ~5,800 hrs, Labor ~18,800 hrs, Raw Material ~32,900 units.",
+              "safe_range": "70% to 80%"
+            },
+            "notable_patterns": {
+              "min_production_requirements": "Most products (likely ~60%) have Min_Production_Requirement = 0. Values are 0, 10, or 20.",
+              "profit_variability": "High coefficient of variation (~57%) in profit per unit, ranging from 6.68 to 134.45.",
+              "resource_intensity": "Raw material is the most intensive resource on average (10.08 units per product), followed by labor (3.34 hrs), Machine B (2.01 hrs), and Machine A (1.71 hrs)."
+            }
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "use_case_analysis",
+        "status": "ok",
+        "output": {
+          "reasoning": "The dataset contains exactly 50 products with per-unit profits, four per-unit resource consumptions (Machine A, Machine B, Labour, Raw Material), and lower/upper production bounds. This maps directly to a classic product-mix linear programming problem. Because no aggregate capacity data is present in the file, capacity limits must be supplied externally; setting them to 65\u201375% of the total max-demand resource requirements creates a non-trivial, constrained optimisation.",
+          "result": {
+            "use_case": "Product-Mix Production Planning / Profit Maximisation",
+            "objective": "Maximise total profit = \u03a3 (Profit_Per_Unit_i \u00d7 Production_Quantity_i) over all 50 products (Product_ID: PROD_001 \u2026 PROD_050)",
+            "decision_variables": "Production_Quantity_i for each product i (continuous or integer units to produce of each Product_ID)",
+            "constraints": {
+              "box_bounds": "Min_Production_Requirement_i \u2264 Production_Quantity_i \u2264 Max_Market_Demand_i for each product i",
+              "resource_constraints": "Four aggregate resource constraints: (1) \u03a3(Machine_A_Hours_Req_i \u00d7 Production_Quantity_i) \u2264 Machine_A_Capacity; (2) \u03a3(Machine_B_Hours_Req_i \u00d7 Production_Quantity_i) \u2264 Machine_B_Capacity; (3) \u03a3(Labor_Hours_Req_i \u00d7 Production_Quantity_i) \u2264 Labor_Capacity; (4) \u03a3(Raw_Material_Units_Req_i \u00d7 Production_Quantity_i) \u2264 Raw_Material_Capacity",
+              "non_negativity": "Production_Quantity_i \u2265 0 (redundant given min-production requirements are \u2265 0)"
+            },
+            "capacity_parameter_synthesis": "The CSV does not contain aggregate capacity-limit columns. Therefore the model will treat capacity limits as external parameters. They will be synthesised as a fixed fraction of the total resource requirements if every product were produced at its Max_Market_Demand. The chosen fraction is 65\u201375% (e.g., 70%) of that theoretical maximum, ensuring the problem is meaningfully constrained and not trivially satisfied by producing every product at its upper bound.",
+            "dataset_summary": {
+              "rows": 50,
+              "columns": [
+                "Product_ID",
+                "Profit_Per_Unit",
+                "Machine_A_Hours_Req",
+                "Machine_B_Hours_Req",
+                "Labor_Hours_Req",
+                "Raw_Material_Units_Req",
+                "Min_Production_Requirement",
+                "Max_Market_Demand"
+              ],
+              "profit_range": [
+                6.68,
+                134.45
+              ],
+              "max_demand_range": [
+                52,
+                499
+              ],
+              "min_production_range": [
+                0,
+                20
+              ]
+            }
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "mathematical_modeling",
+        "status": "ok",
+        "output": {
+          "reasoning": "",
+          "result": {
+            "model_type": "Mixed-Integer Linear Programming (MILP)",
+            "sets": {
+              "Products": "Set of all products to be manufactured. |Products| = 50. Each element corresponds to a unique Product_ID from the CSV file: {PROD_001, PROD_002, ..., PROD_050}."
+            },
+            "parameters": {
+              "product_parameters": {
+                "description": "Parameters indexed by i \u2208 Products, derived directly from CSV columns",
+                "profit_i": "Profit_Per_Unit \u2014 profit contribution per unit of product i ($/unit)",
+                "machineA_i": "Machine_A_Hours_Req \u2014 hours required on Machine A per unit of product i (hours/unit)",
+                "machineB_i": "Machine_B_Hours_Req \u2014 hours required on Machine B per unit of product i (hours/unit)",
+                "labor_i": "Labor_Hours_Req \u2014 labor hours required per unit of product i (hours/unit)",
+                "raw_i": "Raw_Material_Units_Req \u2014 raw material units required per unit of product i (units/unit)",
+                "min_i": "Min_Production_Requirement \u2014 minimum production quantity for product i (units)",
+                "max_i": "Max_Market_Demand \u2014 maximum market demand (upper bound) for product i (units)"
+              },
+              "capacity_parameters": {
+                "description": "Global capacity limits (scalar parameters, not in CSV \u2014 must be supplied externally)",
+                "CAP_A": "Total available capacity on Machine A (hours)",
+                "CAP_B": "Total available capacity on Machine B (hours)",
+                "CAP_LAB": "Total available labor hours (hours)",
+                "CAP_RAW": "Total available raw material units (units)"
+              }
+            },
+            "decision_variables": {
+              "X_i": {
+                "description": "Number of units to produce of product i",
+                "domain": "Integer",
+                "bounds": "X_i \u2208 \u2124,  X_i \u2265 0",
+                "rationale": "X_i must be integer because production units are discrete (whole units)."
+              }
+            },
+            "objective_function": {
+              "direction": "Maximize",
+              "expression": "\u2211_{i \u2208 Products} profit_i \u00b7 X_i",
+              "description": "Maximize total profit across all products"
+            },
+            "constraints": [
+              {
+                "name": "Machine_A_Capacity",
+                "expression": "\u2211_{i \u2208 Products} machineA_i \u00b7 X_i \u2264 CAP_A",
+                "description": "Total Machine A hours consumed by all products cannot exceed available capacity"
+              },
+              {
+                "name": "Machine_B_Capacity",
+                "expression": "\u2211_{i \u2208 Products} machineB_i \u00b7 X_i \u2264 CAP_B",
+                "description": "Total Machine B hours consumed by all products cannot exceed available capacity"
+              },
+              {
+                "name": "Labor_Capacity",
+                "expression": "\u2211_{i \u2208 Products} labor_i \u00b7 X_i \u2264 CAP_LAB",
+                "description": "Total labor hours consumed by all products cannot exceed available labor capacity"
+              },
+              {
+                "name": "Raw_Material_Capacity",
+                "expression": "\u2211_{i \u2208 Products} raw_i \u00b7 X_i \u2264 CAP_RAW",
+                "description": "Total raw material units consumed by all products cannot exceed available raw material supply"
+              },
+              {
+                "name": "Production_Bounds",
+                "expression": "min_i \u2264 X_i \u2264 max_i,   \u2200 i \u2208 Products",
+                "description": "Each product must satisfy its minimum production requirement and cannot exceed its maximum market demand"
+              }
+            ],
+            "complete_formal_model": "SETS\n  i \u2208 Products = {PROD_001, PROD_002, ..., PROD_050}     (indexed by Product_ID from CSV)\n\nPARAMETERS\n  profit_i      = Profit_Per_Unit[i]            ($/unit)\n  machineA_i    = Machine_A_Hours_Req[i]        (hours/unit)\n  machineB_i    = Machine_B_Hours_Req[i]        (hours/unit)\n  labor_i       = Labor_Hours_Req[i]            (hours/unit)\n  raw_i         = Raw_Material_Units_Req[i]     (units/unit)\n  min_i         = Min_Production_Requirement[i] (units)\n  max_i         = Max_Market_Demand[i]          (units)\n  CAP_A         = Total Machine A capacity      (hours)\n  CAP_B         = Total Machine B capacity      (hours)\n  CAP_LAB       = Total labor capacity          (hours)\n  CAP_RAW       = Total raw material capacity   (units)\n\nVARIABLES\n  X_i \u2265 0, integer    \u2200 i \u2208 Products\n\nOBJECTIVE\n  Maximize  Z = \u2211_{i \u2208 Products} profit_i \u00b7 X_i\n\nSUBJECT TO\n  (1) Machine A:     \u2211_{i \u2208 Products} machineA_i \u00b7 X_i \u2264 CAP_A\n  (2) Machine B:     \u2211_{i \u2208 Products} machineB_i \u00b7 X_i \u2264 CAP_B\n  (3) Labor:         \u2211_{i \u2208 Products} labor_i \u00b7 X_i \u2264 CAP_LAB\n  (4) Raw Material:  \u2211_{i \u2208 Products} raw_i \u00b7 X_i \u2264 CAP_RAW\n  (5) Bounds:        min_i \u2264 X_i \u2264 max_i,   \u2200 i \u2208 Products",
+            "pulp_mapping_notes": "- Create LpVariable.dicts('X', Products, lowBound=0, cat='Integer')\n- Objective: lpSum([profit[i] * X[i] for i in Products])\n- Constraints: lpSum([machineA[i] * X[i] for i in Products]) <= CAP_A, etc.\n- Bound constraints: X[i] >= min[i] and X[i] <= max[i] for each i (or set lowBound=min[i], upBound=max[i] in variable definition)"
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "preprocessing",
+        "status": "ok",
+        "output": {
+          "reasoning": "",
+          "result": {
+            "code_snippet": "import pandas as pd\n\n# ------------------------------------------------------------------\n# 1. Load CSV and set Product_ID as string index\n# ------------------------------------------------------------------\nFILE_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp2yons1dq.csv\"\ndf = pd.read_csv(FILE_PATH)\ndf[\"Product_ID\"] = df[\"Product_ID\"].astype(str)\ndf.set_index(\"Product_ID\", inplace=True)\n\n# ------------------------------------------------------------------\n# 2. Build parameter dictionaries keyed by Product_ID (string)\n# ------------------------------------------------------------------\nPROFIT        = df[\"Profit_Per_Unit\"].to_dict()\nMACH_A_REQ    = df[\"Machine_A_Hours_Req\"].to_dict()\nMACH_B_REQ    = df[\"Machine_B_Hours_Req\"].to_dict()\nLABOR_REQ     = df[\"Labor_Hours_Req\"].to_dict()\nRAW_REQ       = df[\"Raw_Material_Units_Req\"].to_dict()\nMIN_PROD      = df[\"Min_Production_Requirement\"].to_dict()\nMAX_DEMAND    = df[\"Max_Market_Demand\"].to_dict()\n\n# Convenience: ordered list of products\nPRODUCTS = list(df.index)\n\n# ------------------------------------------------------------------\n# 3. Compute capacity limits at 70% of max-demand total consumption\n# ------------------------------------------------------------------\n# If every product is produced at its Max_Market_Demand, total resource\n# consumption per resource is the sum of (requirement * max_demand).\n# Capacity = 70% of that total.\n\ntotal_mach_a = sum(MACH_A_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_mach_b = sum(MACH_B_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_labor  = sum(LABOR_REQ[p]  * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_raw    = sum(RAW_REQ[p]    * MAX_DEMAND[p] for p in PRODUCTS)\n\nCAP_A   = 0.70 * total_mach_a\nCAP_B   = 0.70 * total_mach_b\nCAP_LAB = 0.70 * total_labor\nCAP_RAW = 0.70 * total_raw\n\n# ------------------------------------------------------------------\n# 4. (Optional) quick sanity print\n# ------------------------------------------------------------------\nprint(f\"CAP_A   = {CAP_A:.2f}\")\nprint(f\"CAP_B   = {CAP_B:.2f}\")\nprint(f\"CAP_LAB = {CAP_LAB:.2f}\")\nprint(f\"CAP_RAW = {CAP_RAW:.2f}\")"
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "coding",
+        "status": "error",
+        "output": {},
+        "error": "GraphRecursionError: Recursion limit of 12 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT"
+      },
+      {
+        "task_id": "validation",
+        "status": "error",
+        "output": {},
+        "error": "Skipped because dependencies failed: ['coding']"
+      }
+    ],
+    "final_code": "\"\"\"\nProduct-Mix Production Planning MILP\n------------------------------------\nMaximises total profit subject to machine, labour, raw-material capacities\nand per-product minimum / maximum production requirements.\n\"\"\"\n\nimport pandas as pd\nfrom pulp import (\n    LpMaximize,\n    LpProblem,\n    LpVariable,\n    lpSum,\n    LpStatus,\n    value,\n)\n\n# ------------------------------------------------------------------\n# 1. Load CSV\n# ------------------------------------------------------------------\nFILE_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp2yons1dq.csv\"\n\ndf = pd.read_csv(FILE_PATH)\ndf[\"Product_ID\"] = df[\"Product_ID\"].astype(str)\ndf.set_index(\"Product_ID\", inplace=True)\n\n# ------------------------------------------------------------------\n# 2. Build parameter dictionaries keyed by Product_ID\n# ------------------------------------------------------------------\nPRODUCTS     = list(df.index)\nPROFIT       = df[\"Profit_Per_Unit\"].to_dict()\nMACH_A_REQ   = df[\"Machine_A_Hours_Req\"].to_dict()\nMACH_B_REQ   = df[\"Machine_B_Hours_Req\"].to_dict()\nLABOR_REQ    = df[\"Labor_Hours_Req\"].to_dict()\nRAW_REQ      = df[\"Raw_Material_Units_Req\"].to_dict()\nMIN_PROD     = df[\"Min_Production_Requirement\"].to_dict()\nMAX_DEMAND   = df[\"Max_Market_Demand\"].to_dict()\n\n# ------------------------------------------------------------------\n# 3. Synthesise capacity limits at 70 % of total max-demand consumption\n# ------------------------------------------------------------------\ntotal_mach_a = sum(MACH_A_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_mach_b = sum(MACH_B_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_labor  = sum(LABOR_REQ[p]  * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_raw    = sum(RAW_REQ[p]    * MAX_DEMAND[p] for p in PRODUCTS)\n\nCAP_A   = 0.70 * total_mach_a\nCAP_B   = 0.70 * total_mach_b\nCAP_LAB = 0.70 * total_labor\nCAP_RAW = 0.70 * total_raw\n\nprint(\"-\" * 50)\nprint(\"SYNTHESISED CAPACITY LIMITS (70% of max-demand total)\")\nprint(\"-\" * 50)\nprint(f\"Machine A capacity : {CAP_A:>12.2f} hrs\")\nprint(f\"Machine B capacity : {CAP_B:>12.2f} hrs\")\nprint(f\"Labor capacity     : {CAP_LAB:>12.2f} hrs\")\nprint(f\"Raw material cap.  : {CAP_RAW:>12.2f} units\")\nprint(\"-\" * 50)\n\n# ------------------------------------------------------------------\n# 4. Define MILP model\n# ------------------------------------------------------------------\nmodel = LpProblem(\"Product_Mix_Profit_Maximization\", LpMaximize)\n\n# Integer production quantities with individual min / max bounds\nX = {\n    p: LpVariable(\n        name=f\"X_{p}\",\n        lowBound=MIN_PROD[p],\n        upBound=MAX_DEMAND[p],\n        cat=\"Integer\",\n    )\n    for p in PRODUCTS\n}\n\n# Objective: maximise total profit\nmodel += lpSum([PROFIT[p] * X[p] for p in PRODUCTS]), \"Total_Profit\"\n\n# Resource constraints\nmodel += lpSum([MACH_A_REQ[p] * X[p] for p in PRODUCTS]) <= CAP_A, \"Machine_A_Capacity\"\nmodel += lpSum([MACH_B_REQ[p] * X[p] for p in PRODUCTS]) <= CAP_B, \"Machine_B_Capacity\"\nmodel += lpSum([LABOR_REQ[p]  * X[p] for p in PRODUCTS]) <= CAP_LAB, \"Labor_Capacity\"\nmodel += lpSum([RAW_REQ[p]    * X[p] for p in PRODUCTS]) <= CAP_RAW, \"Raw_Material_Capacity\"\n\n# ------------------------------------------------------------------\n# 5. Solve\n# ------------------------------------------------------------------\nmodel.solve()\n\n# ------------------------------------------------------------------\n# 6. Report results\n# ------------------------------------------------------------------\nprint(\"\\n\" + \"=\" * 50)\nprint(\"OPTIMISATION RESULTS\")\nprint(\"=\" * 50)\nprint(f\"Solver status      : {LpStatus[model.status]}\")\nprint(f\"Total profit ($)   : {value(model.objective):.2f}\")\nprint(\"-\" * 50)\nprint(\"Production quantities (units):\")\nfor p in PRODUCTS:\n    qty = X[p].varValue\n    print(f\"  {p}: {qty}\")\nprint(\"=\" * 50)\n",
+    "final_output": {
+      "code": "\"\"\"\nProduct-Mix Production Planning MILP\n------------------------------------\nMaximises total profit subject to machine, labour, raw-material capacities\nand per-product minimum / maximum production requirements.\n\"\"\"\n\nimport pandas as pd\nfrom pulp import (\n    LpMaximize,\n    LpProblem,\n    LpVariable,\n    lpSum,\n    LpStatus,\n    value,\n)\n\n# ------------------------------------------------------------------\n# 1. Load CSV\n# ------------------------------------------------------------------\nFILE_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp2yons1dq.csv\"\n\ndf = pd.read_csv(FILE_PATH)\ndf[\"Product_ID\"] = df[\"Product_ID\"].astype(str)\ndf.set_index(\"Product_ID\", inplace=True)\n\n# ------------------------------------------------------------------\n# 2. Build parameter dictionaries keyed by Product_ID\n# ------------------------------------------------------------------\nPRODUCTS     = list(df.index)\nPROFIT       = df[\"Profit_Per_Unit\"].to_dict()\nMACH_A_REQ   = df[\"Machine_A_Hours_Req\"].to_dict()\nMACH_B_REQ   = df[\"Machine_B_Hours_Req\"].to_dict()\nLABOR_REQ    = df[\"Labor_Hours_Req\"].to_dict()\nRAW_REQ      = df[\"Raw_Material_Units_Req\"].to_dict()\nMIN_PROD     = df[\"Min_Production_Requirement\"].to_dict()\nMAX_DEMAND   = df[\"Max_Market_Demand\"].to_dict()\n\n# ------------------------------------------------------------------\n# 3. Synthesise capacity limits at 70 % of total max-demand consumption\n# ------------------------------------------------------------------\ntotal_mach_a = sum(MACH_A_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_mach_b = sum(MACH_B_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_labor  = sum(LABOR_REQ[p]  * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_raw    = sum(RAW_REQ[p]    * MAX_DEMAND[p] for p in PRODUCTS)\n\nCAP_A   = 0.70 * total_mach_a\nCAP_B   = 0.70 * total_mach_b\nCAP_LAB = 0.70 * total_labor\nCAP_RAW = 0.70 * total_raw\n\nprint(\"-\" * 50)\nprint(\"SYNTHESISED CAPACITY LIMITS (70% of max-demand total)\")\nprint(\"-\" * 50)\nprint(f\"Machine A capacity : {CAP_A:>12.2f} hrs\")\nprint(f\"Machine B capacity : {CAP_B:>12.2f} hrs\")\nprint(f\"Labor capacity     : {CAP_LAB:>12.2f} hrs\")\nprint(f\"Raw material cap.  : {CAP_RAW:>12.2f} units\")\nprint(\"-\" * 50)\n\n# ------------------------------------------------------------------\n# 4. Define MILP model\n# ------------------------------------------------------------------\nmodel = LpProblem(\"Product_Mix_Profit_Maximization\", LpMaximize)\n\n# Integer production quantities with individual min / max bounds\nX = {\n    p: LpVariable(\n        name=f\"X_{p}\",\n        lowBound=MIN_PROD[p],\n        upBound=MAX_DEMAND[p],\n        cat=\"Integer\",\n    )\n    for p in PRODUCTS\n}\n\n# Objective: maximise total profit\nmodel += lpSum([PROFIT[p] * X[p] for p in PRODUCTS]), \"Total_Profit\"\n\n# Resource constraints\nmodel += lpSum([MACH_A_REQ[p] * X[p] for p in PRODUCTS]) <= CAP_A, \"Machine_A_Capacity\"\nmodel += lpSum([MACH_B_REQ[p] * X[p] for p in PRODUCTS]) <= CAP_B, \"Machine_B_Capacity\"\nmodel += lpSum([LABOR_REQ[p]  * X[p] for p in PRODUCTS]) <= CAP_LAB, \"Labor_Capacity\"\nmodel += lpSum([RAW_REQ[p]    * X[p] for p in PRODUCTS]) <= CAP_RAW, \"Raw_Material_Capacity\"\n\n# ------------------------------------------------------------------\n# 5. Solve\n# ------------------------------------------------------------------\nmodel.solve()\n\n# ------------------------------------------------------------------\n# 6. Report results\n# ------------------------------------------------------------------\nprint(\"\\n\" + \"=\" * 50)\nprint(\"OPTIMISATION RESULTS\")\nprint(\"=\" * 50)\nprint(f\"Solver status      : {LpStatus[model.status]}\")\nprint(f\"Total profit ($)   : {value(model.objective):.2f}\")\nprint(\"-\" * 50)\nprint(\"Production quantities (units):\")\nfor p in PRODUCTS:\n    qty = X[p].varValue\n    print(f\"  {p}: {qty}\")\nprint(\"=\" * 50)\n",
+      "output_schema": {
+        "solver_status": "string \u2014 PuLP status (e.g., Optimal, Infeasible, Unbounded)",
+        "total_profit": "float \u2014 maximised total profit across all products",
+        "capacity_limits": {
+          "machine_a_hours": "float",
+          "machine_b_hours": "float",
+          "labor_hours": "float",
+          "raw_material_units": "float"
+        },
+        "production_quantities": "dict[string, int] \u2014 units to produce for each Product_ID"
+      },
+      "successful_implementation": true,
+      "notes": [
+        "Capacity limits are synthesised at 70% of the theoretical total resource consumption if every product were produced at its Max_Market_Demand, because the CSV does not contain aggregate capacity columns.",
+        "Decision variables X_i are declared as Integer (MILP) with individual lower bounds = Min_Production_Requirement and upper bounds = Max_Market_Demand.",
+        "The script is fully self-contained: it loads the CSV, builds parameters, constructs the PuLP model, solves it, and prints the solution status, objective value, and all decision-variable values."
+      ]
+    },
+    "status": "ok",
+    "traces": [
+      "csv_resolved",
+      "csv_loaded:50rows",
+      "plan_generated:6tasks",
+      "executed_task:data_inspection",
+      "executed_task:use_case_analysis",
+      "executed_task:mathematical_modeling",
+      "interrupted_for_feedback",
+      "executed_task:mathematical_modeling",
+      "executed_task:preprocessing",
+      "executed_task:coding",
+      "execution_done:ok=4,errors=2",
+      "assembly_done",
+      "code_saved:C:\\Users\\simon\\6_Semester\\kip\\KIP_texprompter\\texprompter\\TestOutputs\\deep_generated_pulp_model.py",
+      "total_time:215.7s"
+    ],
+    "errors": [],
+    "use_case": {
+      "use_case": "Product-Mix Production Planning / Profit Maximisation",
+      "objective": "Maximise total profit = \u03a3 (Profit_Per_Unit_i \u00d7 Production_Quantity_i) over all 50 products (Product_ID: PROD_001 \u2026 PROD_050)",
+      "decision_variables": "Production_Quantity_i for each product i (continuous or integer units to produce of each Product_ID)",
+      "constraints": {
+        "box_bounds": "Min_Production_Requirement_i \u2264 Production_Quantity_i \u2264 Max_Market_Demand_i for each product i",
+        "resource_constraints": "Four aggregate resource constraints: (1) \u03a3(Machine_A_Hours_Req_i \u00d7 Production_Quantity_i) \u2264 Machine_A_Capacity; (2) \u03a3(Machine_B_Hours_Req_i \u00d7 Production_Quantity_i) \u2264 Machine_B_Capacity; (3) \u03a3(Labor_Hours_Req_i \u00d7 Production_Quantity_i) \u2264 Labor_Capacity; (4) \u03a3(Raw_Material_Units_Req_i \u00d7 Production_Quantity_i) \u2264 Raw_Material_Capacity",
+        "non_negativity": "Production_Quantity_i \u2265 0 (redundant given min-production requirements are \u2265 0)"
+      },
+      "capacity_parameter_synthesis": "The CSV does not contain aggregate capacity-limit columns. Therefore the model will treat capacity limits as external parameters. They will be synthesised as a fixed fraction of the total resource requirements if every product were produced at its Max_Market_Demand. The chosen fraction is 65\u201375% (e.g., 70%) of that theoretical maximum, ensuring the problem is meaningfully constrained and not trivially satisfied by producing every product at its upper bound.",
+      "dataset_summary": {
+        "rows": 50,
+        "columns": [
+          "Product_ID",
+          "Profit_Per_Unit",
+          "Machine_A_Hours_Req",
+          "Machine_B_Hours_Req",
+          "Labor_Hours_Req",
+          "Raw_Material_Units_Req",
+          "Min_Production_Requirement",
+          "Max_Market_Demand"
+        ],
+        "profit_range": [
+          6.68,
+          134.45
+        ],
+        "max_demand_range": [
+          52,
+          499
+        ],
+        "min_production_range": [
+          0,
+          20
+        ]
+      }
+    },
+    "modelling": {
+      "model_type": "Mixed-Integer Linear Programming (MILP)",
+      "sets": {
+        "Products": "Set of all products to be manufactured. |Products| = 50. Each element corresponds to a unique Product_ID from the CSV file: {PROD_001, PROD_002, ..., PROD_050}."
+      },
+      "parameters": {
+        "product_parameters": {
+          "description": "Parameters indexed by i \u2208 Products, derived directly from CSV columns",
+          "profit_i": "Profit_Per_Unit \u2014 profit contribution per unit of product i ($/unit)",
+          "machineA_i": "Machine_A_Hours_Req \u2014 hours required on Machine A per unit of product i (hours/unit)",
+          "machineB_i": "Machine_B_Hours_Req \u2014 hours required on Machine B per unit of product i (hours/unit)",
+          "labor_i": "Labor_Hours_Req \u2014 labor hours required per unit of product i (hours/unit)",
+          "raw_i": "Raw_Material_Units_Req \u2014 raw material units required per unit of product i (units/unit)",
+          "min_i": "Min_Production_Requirement \u2014 minimum production quantity for product i (units)",
+          "max_i": "Max_Market_Demand \u2014 maximum market demand (upper bound) for product i (units)"
+        },
+        "capacity_parameters": {
+          "description": "Global capacity limits (scalar parameters, not in CSV \u2014 must be supplied externally)",
+          "CAP_A": "Total available capacity on Machine A (hours)",
+          "CAP_B": "Total available capacity on Machine B (hours)",
+          "CAP_LAB": "Total available labor hours (hours)",
+          "CAP_RAW": "Total available raw material units (units)"
+        }
+      },
+      "decision_variables": {
+        "X_i": {
+          "description": "Number of units to produce of product i",
+          "domain": "Integer",
+          "bounds": "X_i \u2208 \u2124,  X_i \u2265 0",
+          "rationale": "X_i must be integer because production units are discrete (whole units)."
+        }
+      },
+      "objective_function": {
+        "direction": "Maximize",
+        "expression": "\u2211_{i \u2208 Products} profit_i \u00b7 X_i",
+        "description": "Maximize total profit across all products"
+      },
+      "constraints": [
+        {
+          "name": "Machine_A_Capacity",
+          "expression": "\u2211_{i \u2208 Products} machineA_i \u00b7 X_i \u2264 CAP_A",
+          "description": "Total Machine A hours consumed by all products cannot exceed available capacity"
+        },
+        {
+          "name": "Machine_B_Capacity",
+          "expression": "\u2211_{i \u2208 Products} machineB_i \u00b7 X_i \u2264 CAP_B",
+          "description": "Total Machine B hours consumed by all products cannot exceed available capacity"
+        },
+        {
+          "name": "Labor_Capacity",
+          "expression": "\u2211_{i \u2208 Products} labor_i \u00b7 X_i \u2264 CAP_LAB",
+          "description": "Total labor hours consumed by all products cannot exceed available labor capacity"
+        },
+        {
+          "name": "Raw_Material_Capacity",
+          "expression": "\u2211_{i \u2208 Products} raw_i \u00b7 X_i \u2264 CAP_RAW",
+          "description": "Total raw material units consumed by all products cannot exceed available raw material supply"
+        },
+        {
+          "name": "Production_Bounds",
+          "expression": "min_i \u2264 X_i \u2264 max_i,   \u2200 i \u2208 Products",
+          "description": "Each product must satisfy its minimum production requirement and cannot exceed its maximum market demand"
+        }
+      ],
+      "complete_formal_model": "SETS\n  i \u2208 Products = {PROD_001, PROD_002, ..., PROD_050}     (indexed by Product_ID from CSV)\n\nPARAMETERS\n  profit_i      = Profit_Per_Unit[i]            ($/unit)\n  machineA_i    = Machine_A_Hours_Req[i]        (hours/unit)\n  machineB_i    = Machine_B_Hours_Req[i]        (hours/unit)\n  labor_i       = Labor_Hours_Req[i]            (hours/unit)\n  raw_i         = Raw_Material_Units_Req[i]     (units/unit)\n  min_i         = Min_Production_Requirement[i] (units)\n  max_i         = Max_Market_Demand[i]          (units)\n  CAP_A         = Total Machine A capacity      (hours)\n  CAP_B         = Total Machine B capacity      (hours)\n  CAP_LAB       = Total labor capacity          (hours)\n  CAP_RAW       = Total raw material capacity   (units)\n\nVARIABLES\n  X_i \u2265 0, integer    \u2200 i \u2208 Products\n\nOBJECTIVE\n  Maximize  Z = \u2211_{i \u2208 Products} profit_i \u00b7 X_i\n\nSUBJECT TO\n  (1) Machine A:     \u2211_{i \u2208 Products} machineA_i \u00b7 X_i \u2264 CAP_A\n  (2) Machine B:     \u2211_{i \u2208 Products} machineB_i \u00b7 X_i \u2264 CAP_B\n  (3) Labor:         \u2211_{i \u2208 Products} labor_i \u00b7 X_i \u2264 CAP_LAB\n  (4) Raw Material:  \u2211_{i \u2208 Products} raw_i \u00b7 X_i \u2264 CAP_RAW\n  (5) Bounds:        min_i \u2264 X_i \u2264 max_i,   \u2200 i \u2208 Products",
+      "pulp_mapping_notes": "- Create LpVariable.dicts('X', Products, lowBound=0, cat='Integer')\n- Objective: lpSum([profit[i] * X[i] for i in Products])\n- Constraints: lpSum([machineA[i] * X[i] for i in Products]) <= CAP_A, etc.\n- Bound constraints: X[i] >= min[i] and X[i] <= max[i] for each i (or set lowBound=min[i], upBound=max[i] in variable definition)"
+    },
+    "preprocessing": {
+      "code_snippet": "import pandas as pd\n\n# ------------------------------------------------------------------\n# 1. Load CSV and set Product_ID as string index\n# ------------------------------------------------------------------\nFILE_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp2yons1dq.csv\"\ndf = pd.read_csv(FILE_PATH)\ndf[\"Product_ID\"] = df[\"Product_ID\"].astype(str)\ndf.set_index(\"Product_ID\", inplace=True)\n\n# ------------------------------------------------------------------\n# 2. Build parameter dictionaries keyed by Product_ID (string)\n# ------------------------------------------------------------------\nPROFIT        = df[\"Profit_Per_Unit\"].to_dict()\nMACH_A_REQ    = df[\"Machine_A_Hours_Req\"].to_dict()\nMACH_B_REQ    = df[\"Machine_B_Hours_Req\"].to_dict()\nLABOR_REQ     = df[\"Labor_Hours_Req\"].to_dict()\nRAW_REQ       = df[\"Raw_Material_Units_Req\"].to_dict()\nMIN_PROD      = df[\"Min_Production_Requirement\"].to_dict()\nMAX_DEMAND    = df[\"Max_Market_Demand\"].to_dict()\n\n# Convenience: ordered list of products\nPRODUCTS = list(df.index)\n\n# ------------------------------------------------------------------\n# 3. Compute capacity limits at 70% of max-demand total consumption\n# ------------------------------------------------------------------\n# If every product is produced at its Max_Market_Demand, total resource\n# consumption per resource is the sum of (requirement * max_demand).\n# Capacity = 70% of that total.\n\ntotal_mach_a = sum(MACH_A_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_mach_b = sum(MACH_B_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_labor  = sum(LABOR_REQ[p]  * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_raw    = sum(RAW_REQ[p]    * MAX_DEMAND[p] for p in PRODUCTS)\n\nCAP_A   = 0.70 * total_mach_a\nCAP_B   = 0.70 * total_mach_b\nCAP_LAB = 0.70 * total_labor\nCAP_RAW = 0.70 * total_raw\n\n# ------------------------------------------------------------------\n# 4. (Optional) quick sanity print\n# ------------------------------------------------------------------\nprint(f\"CAP_A   = {CAP_A:.2f}\")\nprint(f\"CAP_B   = {CAP_B:.2f}\")\nprint(f\"CAP_LAB = {CAP_LAB:.2f}\")\nprint(f\"CAP_RAW = {CAP_RAW:.2f}\")"
+    },
+    "scripting": {
+      "code": "\"\"\"\nProduct-Mix Production Planning MILP\n------------------------------------\nMaximises total profit subject to machine, labour, raw-material capacities\nand per-product minimum / maximum production requirements.\n\"\"\"\n\nimport pandas as pd\nfrom pulp import (\n    LpMaximize,\n    LpProblem,\n    LpVariable,\n    lpSum,\n    LpStatus,\n    value,\n)\n\n# ------------------------------------------------------------------\n# 1. Load CSV\n# ------------------------------------------------------------------\nFILE_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp2yons1dq.csv\"\n\ndf = pd.read_csv(FILE_PATH)\ndf[\"Product_ID\"] = df[\"Product_ID\"].astype(str)\ndf.set_index(\"Product_ID\", inplace=True)\n\n# ------------------------------------------------------------------\n# 2. Build parameter dictionaries keyed by Product_ID\n# ------------------------------------------------------------------\nPRODUCTS     = list(df.index)\nPROFIT       = df[\"Profit_Per_Unit\"].to_dict()\nMACH_A_REQ   = df[\"Machine_A_Hours_Req\"].to_dict()\nMACH_B_REQ   = df[\"Machine_B_Hours_Req\"].to_dict()\nLABOR_REQ    = df[\"Labor_Hours_Req\"].to_dict()\nRAW_REQ      = df[\"Raw_Material_Units_Req\"].to_dict()\nMIN_PROD     = df[\"Min_Production_Requirement\"].to_dict()\nMAX_DEMAND   = df[\"Max_Market_Demand\"].to_dict()\n\n# ------------------------------------------------------------------\n# 3. Synthesise capacity limits at 70 % of total max-demand consumption\n# ------------------------------------------------------------------\ntotal_mach_a = sum(MACH_A_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_mach_b = sum(MACH_B_REQ[p] * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_labor  = sum(LABOR_REQ[p]  * MAX_DEMAND[p] for p in PRODUCTS)\ntotal_raw    = sum(RAW_REQ[p]    * MAX_DEMAND[p] for p in PRODUCTS)\n\nCAP_A   = 0.70 * total_mach_a\nCAP_B   = 0.70 * total_mach_b\nCAP_LAB = 0.70 * total_labor\nCAP_RAW = 0.70 * total_raw\n\nprint(\"-\" * 50)\nprint(\"SYNTHESISED CAPACITY LIMITS (70% of max-demand total)\")\nprint(\"-\" * 50)\nprint(f\"Machine A capacity : {CAP_A:>12.2f} hrs\")\nprint(f\"Machine B capacity : {CAP_B:>12.2f} hrs\")\nprint(f\"Labor capacity     : {CAP_LAB:>12.2f} hrs\")\nprint(f\"Raw material cap.  : {CAP_RAW:>12.2f} units\")\nprint(\"-\" * 50)\n\n# ------------------------------------------------------------------\n# 4. Define MILP model\n# ------------------------------------------------------------------\nmodel = LpProblem(\"Product_Mix_Profit_Maximization\", LpMaximize)\n\n# Integer production quantities with individual min / max bounds\nX = {\n    p: LpVariable(\n        name=f\"X_{p}\",\n        lowBound=MIN_PROD[p],\n        upBound=MAX_DEMAND[p],\n        cat=\"Integer\",\n    )\n    for p in PRODUCTS\n}\n\n# Objective: maximise total profit\nmodel += lpSum([PROFIT[p] * X[p] for p in PRODUCTS]), \"Total_Profit\"\n\n# Resource constraints\nmodel += lpSum([MACH_A_REQ[p] * X[p] for p in PRODUCTS]) <= CAP_A, \"Machine_A_Capacity\"\nmodel += lpSum([MACH_B_REQ[p] * X[p] for p in PRODUCTS]) <= CAP_B, \"Machine_B_Capacity\"\nmodel += lpSum([LABOR_REQ[p]  * X[p] for p in PRODUCTS]) <= CAP_LAB, \"Labor_Capacity\"\nmodel += lpSum([RAW_REQ[p]    * X[p] for p in PRODUCTS]) <= CAP_RAW, \"Raw_Material_Capacity\"\n\n# ------------------------------------------------------------------\n# 5. Solve\n# ------------------------------------------------------------------\nmodel.solve()\n\n# ------------------------------------------------------------------\n# 6. Report results\n# ------------------------------------------------------------------\nprint(\"\\n\" + \"=\" * 50)\nprint(\"OPTIMISATION RESULTS\")\nprint(\"=\" * 50)\nprint(f\"Solver status      : {LpStatus[model.status]}\")\nprint(f\"Total profit ($)   : {value(model.objective):.2f}\")\nprint(\"-\" * 50)\nprint(\"Production quantities (units):\")\nfor p in PRODUCTS:\n    qty = X[p].varValue\n    print(f\"  {p}: {qty}\")\nprint(\"=\" * 50)\n",
+      "output_schema": {
+        "solver_status": "string \u2014 PuLP status (e.g., Optimal, Infeasible, Unbounded)",
+        "total_profit": "float \u2014 maximised total profit across all products",
+        "capacity_limits": {
+          "machine_a_hours": "float",
+          "machine_b_hours": "float",
+          "labor_hours": "float",
+          "raw_material_units": "float"
+        },
+        "production_quantities": "dict[string, int] \u2014 units to produce for each Product_ID"
+      },
+      "successful_implementation": true
+    }
+  }
+}

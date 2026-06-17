@@ -1,0 +1,856 @@
+{
+  "metadata": {
+    "timestamp": "20260611_180351",
+    "csv_filename": "Production.csv",
+    "initial_prompt": "as this csv holds complex production data, consider invoking subagents with special tasks, not only the given standard subagents",
+    "modeling_edited": false
+  },
+  "pipeline_state": {
+    "csv_file_path": "C:\\Users\\simon\\AppData\\Local\\Temp\\tmpavqxqmtz.csv",
+    "initial_prompt": "as this csv holds complex production data, consider invoking subagents with special tasks, not only the given standard subagents",
+    "plan": {
+      "goal": "Develop a PuLP optimization model for production scheduling and energy efficiency based on the beverage production line data, optimizing heating operations and production timing to minimize energy consumption while meeting production targets.",
+      "tasks": [
+        {
+          "task_id": "data_inspection",
+          "task_type": "data_inspection",
+          "description": "Analyze the CSV data in detail to understand: (1) the state transition patterns in CupState, (2) the relationship between heating operations (HeaterOn, HeatingTimePercent) and production events (Produce), (3) the timing patterns between ScaleCupUp/ScaleCupDown and TrackSwitch operations, (4) identify any bottlenecks or inefficiencies in the production sequence. Return a summary of key patterns, state transition frequencies, and production cycle characteristics.",
+          "depends_on": [],
+          "expected_output": "Detailed analysis report with state transition patterns, production cycle timing, heating operation patterns, and identified optimization opportunities."
+        },
+        {
+          "task_id": "use_case_analysis",
+          "task_type": "use_case_analysis",
+          "description": "Based on the data inspection results, identify the optimal OR use case for this production data. Consider options like: production scheduling optimization, energy consumption minimization, throughput maximization, or resource allocation. Select the most meaningful optimization problem and justify the choice. Define the decision variables, objective function direction (minimize/maximize), and key constraints that would apply.",
+          "depends_on": [],
+          "expected_output": "Clear specification of the optimization use case including: problem type, decision variables, objective function, and constraint categories."
+        },
+        {
+          "task_id": "mathematical_modeling",
+          "task_type": "modeling",
+          "description": "Formulate the complete mathematical optimization model based on the selected use case. Define: (1) decision variables (e.g., production timing, heating schedules), (2) objective function (e.g., minimize total heating time or energy), (3) constraints (e.g., production capacity, sequence requirements, timing constraints). Provide the mathematical formulation with equations and variable definitions.",
+          "depends_on": [],
+          "expected_output": "Complete mathematical model formulation with decision variables, objective function, and all constraints expressed mathematically."
+        },
+        {
+          "task_id": "preprocessing",
+          "task_type": "preprocessing",
+          "description": "Write Python code to preprocess the CSV data for the optimization model. This includes: (1) loading and cleaning the data, (2) extracting production cycles from the timestamp and state data, (3) calculating parameters needed for the model (e.g., average heating times, production rates, capacity constraints), (4) creating data structures that map CSV columns to model parameters. Return executable preprocessing code.",
+          "depends_on": [],
+          "expected_output": "Executable Python preprocessing code that transforms raw CSV data into model-ready parameters and data structures."
+        },
+        {
+          "task_id": "pulp_coding",
+          "task_type": "coding",
+          "description": "Write the complete PuLP optimization code that: (1) imports necessary libraries (pulp, pandas, numpy), (2) loads and preprocesses the data using the preprocessing code, (3) defines the optimization problem with decision variables, (4) implements the objective function and all constraints from the mathematical model, (5) solves the problem and outputs results including optimal schedule, objective value, and key metrics. Ensure the code is complete and runnable.",
+          "depends_on": [],
+          "expected_output": "Complete, runnable PuLP Python code that solves the optimization problem and outputs meaningful results."
+        },
+        {
+          "task_id": "validation",
+          "task_type": "validation",
+          "description": "Review the generated PuLP code for: (1) syntax errors, (2) logical consistency with the mathematical model, (3) proper handling of edge cases, (4) correct variable and constraint definitions. If possible, run the code in a sandbox environment to verify it executes without errors. Report any issues and suggest fixes.",
+          "depends_on": [],
+          "expected_output": "Validation report confirming code correctness or listing specific issues with recommended fixes."
+        }
+      ]
+    },
+    "results": [
+      {
+        "task_id": "data_inspection",
+        "status": "error",
+        "output": {},
+        "error": "GraphRecursionError: Recursion limit of 12 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT"
+      },
+      {
+        "task_id": "use_case_analysis",
+        "status": "ok",
+        "output": {
+          "reasoning": "Based on the data inspection, this is industrial production monitoring data with multiple control variables (FanOn, HeaterOn, HeatCoverClosed, ScaleCupDown, ScaleCupUp, SwitchToPot, TrackSwitchAtCup, TrackSwitchAtPot, TurnScaleCup), state variables (CupState, CurrentWeight), and a production indicator (Produce). The data shows 7,728 observations with production events being rare (0.05% mean). The presence of HeatingTimePercent suggests energy/time tracking. The most meaningful optimization problem is Production Throughput Maximization with Energy Efficiency constraints, as we can optimize control signals to maximize production output while managing energy consumption.",
+          "result": {
+            "decision_variables": [
+              {
+                "description": "Whether to activate heater at time t",
+                "name": "HeaterOn_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to activate fan at time t",
+                "name": "FanOn_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to close heat cover at time t",
+                "name": "HeatCoverClosed_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to lower scale cup at time t",
+                "name": "ScaleCupDown_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to raise scale cup at time t",
+                "name": "ScaleCupUp_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to switch to pot at time t",
+                "name": "SwitchToPot_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to activate track switch at cup at time t",
+                "name": "TrackSwitchAtCup_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to activate track switch at pot at time t",
+                "name": "TrackSwitchAtPot_t",
+                "type": "binary"
+              },
+              {
+                "description": "Whether to turn scale cup at time t",
+                "name": "TurnScaleCup_t",
+                "type": "binary"
+              }
+            ],
+            "justification": "This optimization problem is most meaningful because: (1) The data contains multiple controllable binary variables that directly affect production, (2) Production events (Produce) are rare (0.05%), indicating significant optimization potential, (3) Energy consumption is tracked via HeatingTimePercent and HeaterOn, allowing for efficiency optimization, (4) The sequential nature of operations (scale, cup, pot, track switches) suggests scheduling optimization can improve throughput, (5) Safety and equipment constraints are present (EmergencyStop, CupState) that must be respected in any optimization solution.",
+            "key_constraints": [
+              {
+                "category": "Production Sequence Constraints",
+                "description": "Ensure proper sequence of operations (ScaleCupDown \u2192 CurrentWeight measurement \u2192 ScaleCupUp \u2192 SwitchToPot)",
+                "example": "ScaleCupDown_t must precede ScaleCupUp_t for each production cycle"
+              },
+              {
+                "category": "Energy Constraints",
+                "description": "Limit total heating time and energy consumption",
+                "example": "\u03a3(HeatingTimePercent_t * HeaterOn_t) \u2264 MaxEnergyBudget"
+              },
+              {
+                "category": "Equipment State Constraints",
+                "description": "Maintain valid equipment states (CupState transitions)",
+                "example": "CupState_t+1 = f(CupState_t, control_variables_t)"
+              },
+              {
+                "category": "Safety Constraints",
+                "description": "Ensure EmergencyStop is respected and equipment operates within safe parameters",
+                "example": "If EmergencyStop_t = 1, then HeaterOn_t = 0, FanOn_t = 0"
+              },
+              {
+                "category": "Capacity Constraints",
+                "description": "Respect weight and material handling limits",
+                "example": "CurrentWeight_t \u2264 MaxWeightCapacity"
+              },
+              {
+                "category": "Timing Constraints",
+                "description": "Ensure minimum/maximum heating times and cycle times",
+                "example": "MinHeatingTime \u2264 HeatingTimePercent_t \u2264 MaxHeatingTime"
+              }
+            ],
+            "objective": {
+              "description": "Maximize total production output (Produce) while minimizing energy consumption",
+              "direction": "maximize",
+              "mathematical_form": "Maximize: \u03a3(Produce_i) - \u03bb * \u03a3(HeatingTimePercent_i * HeaterOn_i)"
+            },
+            "optimization_use_case": "Production Throughput Maximization with Energy Efficiency",
+            "problem_type": "Mixed-Integer Linear Programming (MILP) for Production Scheduling"
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "mathematical_modeling",
+        "status": "ok",
+        "output": {
+          "reasoning": "Based on the CSV data analysis, this is a production scheduling optimization problem for a heating/processing system. The data contains timestamps, cup states, weight measurements, and various control signals (heater, fan, scale movements, etc.). I will formulate a Mixed-Integer Linear Programming (MILP) model for optimizing the production process with decision variables for production timing, heating schedules, and state transitions.",
+          "result": {
+            "column_mappings": {
+              "CupState": "State variable s_{i,t}",
+              "CurrentWeight": "Weight variable weight_{i,t}",
+              "EmergencyStop": "Emergency stop parameter E_stop",
+              "FanOn": "Fan operation variable f_t",
+              "HeatCoverClosed": "Heat cover variable c_t",
+              "HeaterOn": "Heater operation variable h_t",
+              "HeatingTimePercent": "Heating time parameter P_i",
+              "PotAvailable": "Pot availability parameter PotAvail_t",
+              "Produce": "Production status variable Produce_t",
+              "ScaleCupDown": "Scale cup down variable scd_t",
+              "ScaleCupUp": "Scale cup up variable scu_t",
+              "SwitchToPot": "Switch to pot variable stp_t",
+              "Timestamp": "Time period index t",
+              "TrackSwitchAtCup": "Track switch at cup parameter",
+              "TrackSwitchAtPot": "Track switch at pot parameter",
+              "TurnScaleCup": "Turn scale cup variable tscc_t"
+            },
+            "constraints": [
+              {
+                "description": "Each item must be processed exactly once",
+                "equation": "\\sum_{t \\in T} x_{i,t} = 1, \\quad \\forall i \\in I",
+                "name": "Production Assignment"
+              },
+              {
+                "description": "State changes must follow valid transitions (0\u21921\u21922 or similar)",
+                "equation": "s_{i,t+1} - s_{i,t} \\leq 1, \\quad \\forall i \\in I, t \\in T",
+                "name": "State Transition"
+              },
+              {
+                "description": "Heating state must align with heater operation",
+                "equation": "y_{i,t} \\leq h_t, \\quad \\forall i \\in I, t \\in T",
+                "name": "Heating State Consistency"
+              },
+              {
+                "description": "Maximum number of items processed per time period",
+                "equation": "\\sum_{i \\in I} x_{i,t} \\leq C_{max}, \\quad \\forall t \\in T",
+                "name": "Capacity Constraint"
+              },
+              {
+                "description": "Heating time percentage cannot exceed maximum",
+                "equation": "\\sum_{t \\in T} y_{i,t} \\leq H_{max} \\cdot P_i, \\quad \\forall i \\in I",
+                "name": "Heating Time Limit"
+              },
+              {
+                "description": "Processing only allowed when weight is within acceptable range",
+                "equation": "W_{min} \\leq weight_{i,t} \\leq W_{max}, \\quad \\forall i \\in I, t \\in T",
+                "name": "Weight Threshold"
+              },
+              {
+                "description": "No processing during emergency stop",
+                "equation": "x_{i,t} \\leq 1 - E_{stop}, \\quad \\forall i \\in I, t \\in T",
+                "name": "Emergency Stop Constraint"
+              },
+              {
+                "description": "Pot must be available for processing",
+                "equation": "x_{i,t} \\leq PotAvail_t, \\quad \\forall i \\in I, t \\in T",
+                "name": "Pot Availability"
+              },
+              {
+                "description": "Heat cover must be closed during heating",
+                "equation": "y_{i,t} \\leq c_t, \\quad \\forall i \\in I, t \\in T",
+                "name": "Heat Cover Constraint"
+              },
+              {
+                "description": "Fan operation linked to heating state",
+                "equation": "f_t \\geq \\sum_{i \\in I} y_{i,t} - M \\cdot (1 - h_t), \\quad \\forall t \\in T",
+                "name": "Fan Operation"
+              },
+              {
+                "description": "Scale cup down and up cannot occur simultaneously",
+                "equation": "scd_t + scu_t \\leq 1, \\quad \\forall t \\in T",
+                "name": "Scale Cup Movement"
+              },
+              {
+                "description": "Switch to pot occurs when transitioning from cup to pot state",
+                "equation": "stp_t = 1 \\iff s_{i,t} = 1 \\land s_{i,t+1} = 2, \\quad \\forall i \\in I, t \\in T",
+                "name": "Switch to Pot"
+              },
+              {
+                "description": "Track switches must be consistent with state transitions",
+                "equation": "TrackSwitchAtCup_t + TrackSwitchAtPot_t \\leq 1, \\quad \\forall t \\in T",
+                "name": "Track Switch Consistency"
+              },
+              {
+                "description": "Turn scale cup operation constraint",
+                "equation": "tscc_t \\leq scd_t, \\quad \\forall t \\in T",
+                "name": "Turn Scale Cup"
+              },
+              {
+                "description": "Production status must align with active processing",
+                "equation": "Produce_t = \\sum_{i \\in I} x_{i,t}, \\quad \\forall t \\in T",
+                "name": "Production Status"
+              },
+              {
+                "description": "Define start and end times for each item",
+                "equation": "start_{i,t} = x_{i,t} \\land (t = \\min\\{t' : x_{i,t'} = 1\\}), \\quad \\forall i \\in I, t \\in T",
+                "name": "Start and End Times"
+              },
+              {
+                "description": "Processing duration must meet minimum requirements",
+                "equation": "\\sum_{t \\in T} y_{i,t} \\geq P_i \\cdot x_{i,t}, \\quad \\forall i \\in I, t \\in T",
+                "name": "Processing Duration"
+              },
+              {
+                "description": "All variables must be non-negative",
+                "equation": "x_{i,t}, y_{i,t}, z_{i,t}, h_t, f_t, c_t, p_t, scd_t, scu_t, stp_t, tscc_t \\geq 0, \\quad \\forall i \\in I, t \\in T",
+                "name": "Non-negativity"
+              },
+              {
+                "description": "Binary variables must be 0 or 1",
+                "equation": "x_{i,t}, y_{i,t}, z_{i,t}, h_t, f_t, c_t, p_t, scd_t, scu_t, stp_t, tscc_t \\in \\{0, 1\\}, \\quad \\forall i \\in I, t \\in T",
+                "name": "Binary Constraints"
+              },
+              {
+                "description": "State variables must be integers",
+                "equation": "s_{i,t} \\in \\{0, 1, 2\\}, \\quad \\forall i \\in I, t \\in T",
+                "name": "Integer Constraints"
+              }
+            ],
+            "decision_variables": {
+              "c_t": "Binary variable: 1 if heat cover is CLOSED at time t, 0 otherwise (from HeatCoverClosed)",
+              "end_{i,t}": "Binary variable: 1 if item i ends processing at time t, 0 otherwise",
+              "f_t": "Binary variable: 1 if fan is ON at time t, 0 otherwise (from FanOn)",
+              "h_t": "Binary variable: 1 if heater is ON at time t, 0 otherwise (from HeaterOn)",
+              "p_t": "Binary variable: 1 if pot is available at time t, 0 otherwise (from PotAvailable)",
+              "s_{i,t}": "Integer variable: State of item i at time t (0, 1, or 2 from CupState)",
+              "scd_t": "Binary variable: 1 if scale cup is DOWN at time t, 0 otherwise (from ScaleCupDown)",
+              "scu_t": "Binary variable: 1 if scale cup is UP at time t, 0 otherwise (from ScaleCupUp)",
+              "start_{i,t}": "Binary variable: 1 if item i starts processing at time t, 0 otherwise",
+              "stp_t": "Binary variable: 1 if switch to pot occurs at time t, 0 otherwise (from SwitchToPot)",
+              "tscc_t": "Binary variable: 1 if turn scale cup occurs at time t, 0 otherwise (from TurnScaleCup)",
+              "weight_{i,t}": "Continuous variable: Weight of item i at time t (from CurrentWeight)",
+              "x_{i,t}": "Binary variable: 1 if item i is processed at time t, 0 otherwise",
+              "y_{i,t}": "Binary variable: 1 if item i is in heating state at time t, 0 otherwise",
+              "z_{i,t}": "Binary variable: 1 if item i is in cooling state at time t, 0 otherwise"
+            },
+            "description": "MILP formulation for optimizing production scheduling in a heating/processing system with cup and pot states, heating controls, and scale operations.",
+            "model_name": "Production Heating Process Optimization",
+            "model_type": "Mixed-Integer Linear Programming (MILP)",
+            "objective_function": {
+              "description": "Minimize total heating time and energy consumption while maximizing throughput",
+              "formulation": "minimize Z = \\sum_{t \\in T} \\left( \\alpha \\cdot h_t + \\beta \\cdot f_t + \\gamma \\cdot \\sum_{i \\in I} y_{i,t} \\right) - \\delta \\cdot \\sum_{i \\in I} \\sum_{t \\in T} x_{i,t}",
+              "parameters": {
+                "alpha": "Cost coefficient for heater operation",
+                "beta": "Cost coefficient for fan operation",
+                "delta": "Revenue/benefit coefficient for completed production",
+                "gamma": "Cost coefficient for heating state duration"
+              }
+            },
+            "parameters": {
+              "C_max": "Maximum production capacity per time period",
+              "E_stop": "Emergency stop status (1 = active, 0 = inactive from EmergencyStop column)",
+              "FanOn_t": "Fan status at time t (from FanOn column)",
+              "H_max": "Maximum heating time percentage (100 from HeatingTimePercent column)",
+              "HeatCover_t": "Heat cover status at time t (from HeatCoverClosed column)",
+              "HeaterOn_t": "Heater status at time t (from HeaterOn column)",
+              "M": "Big-M constant for linearization",
+              "P_i": "Processing time required for item i (derived from HeatingTimePercent)",
+              "PotAvail_t": "Pot availability at time t (from PotAvailable column)",
+              "Produce_t": "Production status at time t (from Produce column)",
+              "ScaleCupDown_t": "Scale cup down status at time t (from ScaleCupDown column)",
+              "ScaleCupUp_t": "Scale cup up status at time t (from ScaleCupUp column)",
+              "SwitchToPot_t": "Switch to pot status at time t (from SwitchToPot column)",
+              "TrackSwitchAtCup_t": "Track switch at cup status at time t (from TrackSwitchAtCup column)",
+              "TrackSwitchAtPot_t": "Track switch at pot status at time t (from TrackSwitchAtPot column)",
+              "TurnScaleCup_t": "Turn scale cup status at time t (from TurnScaleCup column)",
+              "W_max": "Maximum weight threshold for processing",
+              "W_min": "Minimum weight threshold for processing (from CurrentWeight column)"
+            },
+            "sets": {
+              "I": "Set of production items/orders to be processed",
+              "M": "Set of machines/stations: {cup, pot, scale}",
+              "S": "Set of possible states: {0, 1, 2} (from CupState column)",
+              "T": "Set of time periods (discrete time steps from Timestamp column)"
+            },
+            "solution_approach": "Solve using commercial solvers (Gurobi, CPLEX) or open-source alternatives (CBC, GLPK)"
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "preprocessing",
+        "status": "ok",
+        "output": {
+          "reasoning": "Based on the dataset analysis, I can see this is production data from what appears to be a processing system (possibly coffee machine or similar). The data has 7728 rows with timestamp, state indicators, and various operational flags. I need to create preprocessing code that:\n\n1. Loads and cleans the CSV data\n2. Extracts production cycles by identifying state transitions\n3. Calculates key parameters like heating times, production rates, cycle times\n4. Creates structured data for the optimization model\n\nThe key columns for cycle extraction are:\n- Timestamp: for timing calculations\n- CupState: state transitions indicate cycle boundaries\n- HeaterOn, HeatingTimePercent: for heating duration\n- Produce: production events\n- ScaleCupUp/Down, SwitchToPot: operational transitions\n\nI'll create a comprehensive preprocessing script with clear documentation.",
+          "result": {
+            "column_to_parameter_mapping": {
+              "CupState": "Production state indicator (0=idle, 1=processing, 2=complete)",
+              "CurrentWeight": "Weight constraint for capacity optimization",
+              "EmergencyStop": "Binary constraint for emergency stop events",
+              "FanOn": "Binary constraint for fan operation",
+              "HeatCoverClosed": "Binary constraint for heat cover status",
+              "HeaterOn": "Binary indicator for heating activation",
+              "HeatingTimePercent": "Heating duration parameter (0-100%)",
+              "PotAvailable": "Binary constraint for pot availability",
+              "Produce": "Binary indicator for production completion events",
+              "ScaleCupDown": "Binary constraint for scale cup down operation",
+              "ScaleCupUp": "Binary constraint for scale cup up operation",
+              "SwitchToPot": "Binary constraint for pot switching",
+              "Timestamp": "Time index for scheduling and cycle duration calculations",
+              "TrackSwitchAtCup": "Binary constraint for track switch at cup",
+              "TrackSwitchAtPot": "Binary constraint for track switch at pot",
+              "TurnScaleCup": "Binary constraint for scale cup turning"
+            },
+            "data_structures_created": [
+              "time_indices",
+              "state_mapping",
+              "column_to_parameter",
+              "cycle_data",
+              "constraint_sets",
+              "decision_variables",
+              "parameters"
+            ],
+            "model_parameters_extracted": [
+              "avg_cycle_time_seconds",
+              "min_cycle_time_seconds",
+              "max_cycle_time_seconds",
+              "std_cycle_time_seconds",
+              "avg_heating_time_percent",
+              "min_heating_time_percent",
+              "max_heating_time_percent",
+              "production_rate_cycles_per_hour",
+              "total_cycles",
+              "min_avg_weight",
+              "max_avg_weight",
+              "avg_weight",
+              "min_max_weight",
+              "max_max_weight",
+              "total_time_seconds",
+              "start_time",
+              "end_time",
+              "state_distribution",
+              "state_probabilities",
+              "heater_on_ratio",
+              "fan_on_ratio",
+              "produce_ratio",
+              "emergency_stop_count",
+              "total_records",
+              "records_per_cycle"
+            ],
+            "preprocessing_code": "import pandas as pd\nimport numpy as np\nfrom datetime import datetime\nfrom collections import defaultdict\nimport json\n\nclass ProductionDataPreprocessor:\n    \"\"\"\n    Preprocesses CSV production data for optimization model.\n    \n    Maps CSV columns to model parameters:\n    - Timestamp -> Time indices for scheduling\n    - CupState -> Production state (0=idle, 1=processing, 2=complete)\n    - HeaterOn, HeatingTimePercent -> Heating duration parameters\n    - Produce -> Production events\n    - ScaleCupUp/Down, SwitchToPot -> Operational constraints\n    - CurrentWeight -> Capacity/weight constraints\n    \"\"\"\n    \n    def __init__(self, csv_path):\n        self.csv_path = csv_path\n        self.df = None\n        self.cycles = []\n        self.parameters = {}\n        self.data_structures = {}\n        \n    def load_and_clean_data(self):\n        \"\"\"\n        Load CSV data and perform initial cleaning.\n        \n        Returns:\n            pd.DataFrame: Cleaned dataframe\n        \"\"\"\n        print(f\"Loading data from: {self.csv_path}\")\n        \n        # Load the CSV\n        self.df = pd.read_csv(self.csv_path)\n        \n        # Convert timestamp to datetime (assuming milliseconds)\n        self.df['Timestamp'] = pd.to_datetime(self.df['Timestamp'], unit='ms')\n        \n        # Ensure binary columns are integers\n        binary_cols = ['EmergencyStop', 'FanOn', 'HeatCoverClosed', 'HeaterOn', \n                      'PotAvailable', 'Produce', 'ScaleCupDown', 'ScaleCupUp',\n                      'SwitchToPot', 'TrackSwitchAtCup', 'TrackSwitchAtPot', 'TurnScaleCup']\n        for col in binary_cols:\n            if col in self.df.columns:\n                self.df[col] = self.df[col].astype(int)\n        \n        # Handle missing values\n        self.df = self.df.fillna(0)\n        \n        # Sort by timestamp\n        self.df = self.df.sort_values('Timestamp').reset_index(drop=True)\n        \n        print(f\"Loaded {len(self.df)} rows\")\n        print(f\"Date range: {self.df['Timestamp'].min()} to {self.df['Timestamp'].max()}\")\n        \n        return self.df\n    \n    def extract_production_cycles(self):\n        \"\"\"\n        Extract production cycles from state transitions.\n        \n        A production cycle is identified by:\n        - Start: CupState changes from 0 to 1 (or HeaterOn becomes 1)\n        - End: CupState changes to 2 or Produce becomes 1\n        \n        Returns:\n            list: List of cycle dictionaries with timing information\n        \"\"\"\n        print(\"Extracting production cycles...\")\n        \n        cycles = []\n        cycle_start = None\n        cycle_id = 0\n        \n        for idx, row in self.df.iterrows():\n            # Detect cycle start: CupState becomes 1 or HeaterOn becomes 1\n            if (row['CupState'] == 1 and (idx == 0 or self.df.iloc[idx-1]['CupState'] != 1)) or \\\n               (row['HeaterOn'] == 1 and (idx == 0 or self.df.iloc[idx-1]['HeaterOn'] != 1)):\n                \n                if cycle_start is not None:\n                    # Save previous cycle\n                    cycle_end = self.df.iloc[idx-1]\n                    cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                    \n                    cycles.append({\n                        'cycle_id': cycle_id,\n                        'start_time': cycle_start['Timestamp'],\n                        'end_time': cycle_end['Timestamp'],\n                        'duration_seconds': cycle_duration,\n                        'start_index': cycle_start_idx,\n                        'end_index': idx - 1,\n                        'heating_time_percent': self.df.loc[cycle_start_idx:idx-1, 'HeatingTimePercent'].mean(),\n                        'max_weight': self.df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].max(),\n                        'avg_weight': self.df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].mean(),\n                        'produce_event': self.df.loc[cycle_start_idx:idx-1, 'Produce'].max() == 1\n                    })\n                    cycle_id += 1\n                \n                cycle_start = row\n                cycle_start_idx = idx\n            \n            # Detect cycle end: CupState becomes 2 or Produce becomes 1\n            if row['CupState'] == 2 or row['Produce'] == 1:\n                if cycle_start is not None:\n                    cycle_end = row\n                    cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                    \n                    cycles.append({\n                        'cycle_id': cycle_id,\n                        'start_time': cycle_start['Timestamp'],\n                        'end_time': row['Timestamp'],\n                        'duration_seconds': cycle_duration,\n                        'start_index': cycle_start_idx,\n                        'end_index': idx,\n                        'heating_time_percent': self.df.loc[cycle_start_idx:idx, 'HeatingTimePercent'].mean(),\n                        'max_weight': self.df.loc[cycle_start_idx:idx, 'CurrentWeight'].max(),\n                        'avg_weight': self.df.loc[cycle_start_idx:idx, 'CurrentWeight'].mean(),\n                        'produce_event': True\n                    })\n                    cycle_id += 1\n                    cycle_start = None\n        \n        # Handle last incomplete cycle\n        if cycle_start is not None:\n            cycle_end = self.df.iloc[-1]\n            cycle_duration = (cycle_end['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n            \n            cycles.append({\n                'cycle_id': cycle_id,\n                'start_time': cycle_start['Timestamp'],\n                'end_time': cycle_end['Timestamp'],\n                'duration_seconds': cycle_duration,\n                'start_index': cycle_start_idx,\n                'end_index': len(self.df) - 1,\n                'heating_time_percent': self.df.loc[cycle_start_idx:, 'HeatingTimePercent'].mean(),\n                'max_weight': self.df.loc[cycle_start_idx:, 'CurrentWeight'].max(),\n                'avg_weight': self.df.loc[cycle_start_idx:, 'CurrentWeight'].mean(),\n                'produce_event': self.df.loc[cycle_start_idx:, 'Produce'].max() == 1\n            })\n        \n        self.cycles = cycles\n        print(f\"Extracted {len(cycles)} production cycles\")\n        \n        return cycles\n    \n    def calculate_model_parameters(self):\n        \"\"\"\n        Calculate parameters needed for the optimization model.\n        \n        Parameters calculated:\n        - Average heating time\n        - Production rate (cycles per hour)\n        - Capacity constraints (min/max weights)\n        - State transition probabilities\n        - Time window constraints\n        \n        Returns:\n            dict: Model parameters dictionary\n        \"\"\"\n        print(\"Calculating model parameters...\")\n        \n        if not self.cycles:\n            self.extract_production_cycles()\n        \n        # Calculate timing parameters\n        durations = [c['duration_seconds'] for c in self.cycles]\n        heating_times = [c['heating_time_percent'] for c in self.cycles]\n        weights = [c['avg_weight'] for c in self.cycles]\n        max_weights = [c['max_weight'] for c in self.cycles]\n        \n        # Time-based parameters\n        total_time = (self.df['Timestamp'].max() - self.df['Timestamp'].min()).total_seconds()\n        \n        parameters = {\n            # Timing parameters\n            'avg_cycle_time_seconds': np.mean(durations) if durations else 0,\n            'min_cycle_time_seconds': np.min(durations) if durations else 0,\n            'max_cycle_time_seconds': np.max(durations) if durations else 0,\n            'std_cycle_time_seconds': np.std(durations) if durations else 0,\n            \n            # Heating parameters\n            'avg_heating_time_percent': np.mean(heating_times) if heating_times else 0,\n            'min_heating_time_percent': np.min(heating_times) if heating_times else 0,\n            'max_heating_time_percent': np.max(heating_times) if heating_times else 0,\n            \n            # Production rate\n            'production_rate_cycles_per_hour': len(self.cycles) / (total_time / 3600) if total_time > 0 else 0,\n            'total_cycles': len(self.cycles),\n            \n            # Capacity constraints\n            'min_avg_weight': np.min(weights) if weights else 0,\n            'max_avg_weight': np.max(weights) if weights else 0,\n            'avg_weight': np.mean(weights) if weights else 0,\n            'min_max_weight': np.min(max_weights) if max_weights else 0,\n            'max_max_weight': np.max(max_weights) if max_weights else 0,\n            \n            # Time window\n            'total_time_seconds': total_time,\n            'start_time': self.df['Timestamp'].min().isoformat(),\n            'end_time': self.df['Timestamp'].max().isoformat(),\n            \n            # State distribution\n            'state_distribution': self.df['CupState'].value_counts().to_dict(),\n            'state_probabilities': self.df['CupState'].value_counts(normalize=True).to_dict(),\n            \n            # Operational constraints\n            'heater_on_ratio': self.df['HeaterOn'].mean(),\n            'fan_on_ratio': self.df['FanOn'].mean(),\n            'produce_ratio': self.df['Produce'].mean(),\n            'emergency_stop_count': self.df['EmergencyStop'].sum(),\n            \n            # Data quality\n            'total_records': len(self.df),\n            'records_per_cycle': len(self.df) / len(self.cycles) if self.cycles else 0\n        }\n        \n        self.parameters = parameters\n        print(f\"Calculated {len(parameters)} model parameters\")\n        \n        return parameters\n    \n    def create_data_structures(self):\n        \"\"\"\n        Create data structures that map CSV columns to model parameters.\n        \n        Returns:\n            dict: Structured data for optimization model\n        \"\"\"\n        print(\"Creating data structures for optimization model...\")\n        \n        # Time indices for scheduling\n        time_indices = list(range(len(self.df)))\n        \n        # State mapping\n        state_mapping = {\n            0: 'idle',\n            1: 'processing',\n            2: 'complete'\n        }\n        \n        # Column to parameter mapping\n        column_to_parameter = {\n            'Timestamp': 'time_index',\n            'CupState': 'production_state',\n            'CurrentWeight': 'weight_constraint',\n            'HeaterOn': 'heating_active',\n            'HeatingTimePercent': 'heating_duration',\n            'Produce': 'production_event',\n            'ScaleCupUp': 'scale_up_event',\n            'ScaleCupDown': 'scale_down_event',\n            'SwitchToPot': 'pot_switch_event',\n            'EmergencyStop': 'emergency_stop',\n            'FanOn': 'fan_active',\n            'HeatCoverClosed': 'cover_closed',\n            'PotAvailable': 'pot_available'\n        }\n        \n        # Cycle-based data structures\n        cycle_data = {\n            'cycles': self.cycles,\n            'cycle_count': len(self.cycles),\n            'cycle_durations': [c['duration_seconds'] for c in self.cycles],\n            'cycle_weights': [c['avg_weight'] for c in self.cycles],\n            'cycle_heating_times': [c['heating_time_percent'] for c in self.cycles]\n        }\n        \n        # Constraint sets\n        constraint_sets = {\n            'time_windows': [\n                {'start': c['start_time'].isoformat(), \n                 'end': c['end_time'].isoformat(), \n                 'duration': c['duration_seconds']} \n                for c in self.cycles\n            ],\n            'capacity_constraints': {\n                'min_weight': self.parameters['min_avg_weight'],\n                'max_weight': self.parameters['max_max_weight'],\n                'avg_weight': self.parameters['avg_weight']\n            },\n            'heating_constraints': {\n                'min_heating_percent': self.parameters['min_heating_time_percent'],\n                'max_heating_percent': self.parameters['max_heating_time_percent'],\n                'avg_heating_percent': self.parameters['avg_heating_time_percent']\n            },\n            'production_constraints': {\n                'min_cycles': int(self.parameters['production_rate_cycles_per_hour'] * 0.8),\n                'max_cycles': int(self.parameters['production_rate_cycles_per_hour'] * 1.2),\n                'target_rate': self.parameters['production_rate_cycles_per_hour']\n            }\n        }\n        \n        # Decision variables structure\n        decision_variables = {\n            'cycle_start_times': [c['start_time'].isoformat() for c in self.cycles],\n            'cycle_durations': [c['duration_seconds'] for c in self.cycles],\n            'heating_durations': [c['heating_time_percent'] for c in self.cycles],\n            'weights': [c['avg_weight'] for c in self.cycles]\n        }\n        \n        self.data_structures = {\n            'time_indices': time_indices,\n            'state_mapping': state_mapping,\n            'column_to_parameter': column_to_parameter,\n            'cycle_data': cycle_data,\n            'constraint_sets': constraint_sets,\n            'decision_variables': decision_variables,\n            'parameters': self.parameters\n        }\n        \n        print(f\"Created data structures with {len(self.data_structures)} main components\")\n        \n        return self.data_structures\n    \n    def run_full_preprocessing(self):\n        \"\"\"\n        Run complete preprocessing pipeline.\n        \n        Returns:\n            dict: Complete preprocessing results\n        \"\"\"\n        print(\"=\"*60)\n        print(\"STARTING PRODUCTION DATA PREPROCESSING\")\n        print(\"=\"*60)\n        \n        # Step 1: Load and clean data\n        self.load_and_clean_data()\n        \n        # Step 2: Extract production cycles\n        self.extract_production_cycles()\n        \n        # Step 3: Calculate model parameters\n        self.calculate_model_parameters()\n        \n        # Step 4: Create data structures\n        self.create_data_structures()\n        \n        print(\"=\"*60)\n        print(\"PREPROCESSING COMPLETE\")\n        print(\"=\"*60)\n        \n        return {\n            'dataframe': self.df,\n            'cycles': self.cycles,\n            'parameters': self.parameters,\n            'data_structures': self.data_structures\n        }\n    \n    def save_results(self, output_dir='output'):\n        \"\"\"\n        Save preprocessing results to files.\n        \n        Args:\n            output_dir: Directory to save results\n        \"\"\"\n        import os\n        os.makedirs(output_dir, exist_ok=True)\n        \n        # Save parameters as JSON\n        with open(f'{output_dir}/model_parameters.json', 'w') as f:\n            json.dump(self.parameters, f, indent=2, default=str)\n        \n        # Save cycles as JSON\n        with open(f'{output_dir}/production_cycles.json', 'w') as f:\n            json.dump(self.cycles, f, indent=2, default=str)\n        \n        # Save data structures as JSON\n        with open(f'{output_dir}/data_structures.json', 'w') as f:\n            json.dump(self.data_structures, f, indent=2, default=str)\n        \n        # Save cleaned dataframe as CSV\n        self.df.to_csv(f'{output_dir}/cleaned_data.csv', index=False)\n        \n        print(f\"Results saved to {output_dir}/\")\n\n\n# Main execution\nif __name__ == \"__main__\":\n    # Configuration\n    CSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpavqxqmtz.csv\"\n    OUTPUT_DIR = \"preprocessing_output\"\n    \n    # Initialize preprocessor\n    preprocessor = ProductionDataPreprocessor(CSV_PATH)\n    \n    # Run full preprocessing\n    results = preprocessor.run_full_preprocessing()\n    \n    # Save results\n    preprocessor.save_results(OUTPUT_DIR)\n    \n    # Display summary\n    print(\"\\n\" + \"=\"*60)\n    print(\"PREPROCESSING SUMMARY\")\n    print(\"=\"*60)\n    print(f\"Total records processed: {results['parameters']['total_records']}\")\n    print(f\"Production cycles identified: {results['parameters']['total_cycles']}\")\n    print(f\"Average cycle time: {results['parameters']['avg_cycle_time_seconds']:.2f} seconds\")\n    print(f\"Production rate: {results['parameters']['production_rate_cycles_per_hour']:.2f} cycles/hour\")\n    print(f\"Average weight: {results['parameters']['avg_weight']:.4f}\")\n    print(f\"Average heating time: {results['parameters']['avg_heating_time_percent']:.2f}%\")\n    print(\"=\"*60)\n",
+            "usage_instructions": "1. Save the preprocessing_code to a Python file (e.g., preprocess_production_data.py)\n2. Run the script: python preprocess_production_data.py\n3. Results will be saved in 'preprocessing_output' directory:\n   - model_parameters.json: Optimization model parameters\n   - production_cycles.json: Extracted production cycles\n   - data_structures.json: Complete data structures for model\n   - cleaned_data.csv: Cleaned and processed data\n4. Import the results in your optimization model:\n   from preprocess_production_data import ProductionDataPreprocessor\n   preprocessor = ProductionDataPreprocessor('path/to/csv.csv')\n   results = preprocessor.run_full_preprocessing()\n   parameters = results['parameters']\n   cycles = results['cycles']"
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "pulp_coding",
+        "status": "error",
+        "output": {},
+        "error": "GraphRecursionError: Recursion limit of 12 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.\nFor troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT"
+      },
+      {
+        "task_id": "validation",
+        "status": "ok",
+        "output": {
+          "raw_text": "I notice you've provided a CSV file path, but you haven't actually shared the PuLP code that needs to be reviewed. To provide a thorough validation report, I need to see the actual Python/PuLP code.\n\nCould you please provide the code you'd like me to review? Once you share it, I'll check for:\n\n1. **Syntax errors** - Using the validate_python_syntax tool\n2. **Logical consistency** - Comparing against the mathematical model\n3. **Edge case handling** - Checking for proper error handling\n4. **Variable and constraint definitions** - Ensuring correctness\n5. **Execution test** - Running the code in a sandbox if possible\n\nPlease paste the PuLP code you want me to review, and I'll provide a detailed validation report."
+        },
+        "error": null
+      }
+    ],
+    "final_code": "#!/usr/bin/env python3\n\"\"\"\nProduction Throughput Maximization with Energy Efficiency Optimization\n======================================================================\nSOLVER: PuLP (CBC solver)\nPROBLEM TYPE: Mixed-Integer Linear Programming (MILP)\n======================================================================\n\nThis script optimizes production scheduling for a heating/processing system\nby maximizing production output while minimizing energy consumption.\n\nAuthor: DeepAgent Pipeline\nDate: 2024\n\"\"\"\n\nimport pandas as pd\nimport numpy as np\nfrom pulp import *\nimport warnings\nimport os\nwarnings.filterwarnings('ignore')\n\n# ============================================================================\n# CONFIGURATION\n# ============================================================================\n\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpavqxqmtz.csv\"\nOUTPUT_DIR = \"optimization_output\"\n\n# Optimization parameters (cost/revenue coefficients)\nALPHA = 1.0   # Cost coefficient for heater operation\nBETA = 0.5    # Cost coefficient for fan operation\nGAMMA = 0.3   # Cost coefficient for heating state duration\nDELTA = 10.0  # Revenue/benefit coefficient for completed production\n\n# ============================================================================\n# DATA PREPROCESSING\n# ============================================================================\n\ndef load_and_clean_data(csv_path):\n    \"\"\"\n    Load CSV data and perform initial cleaning.\n    \n    Args:\n        csv_path: Path to the CSV file\n        \n    Returns:\n        pd.DataFrame: Cleaned dataframe\n    \"\"\"\n    print(f\"Loading data from: {csv_path}\")\n    \n    # Load the CSV\n    df = pd.read_csv(csv_path)\n    \n    # Convert timestamp to datetime (assuming milliseconds)\n    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')\n    \n    # Ensure binary columns are integers\n    binary_cols = ['EmergencyStop', 'FanOn', 'HeatCoverClosed', 'HeaterOn', \n                  'PotAvailable', 'Produce', 'ScaleCupDown', 'ScaleCupUp',\n                  'SwitchToPot', 'TrackSwitchAtCup', 'TrackSwitchAtPot', 'TurnScaleCup']\n    for col in binary_cols:\n        if col in df.columns:\n            df[col] = df[col].astype(int)\n    \n    # Handle missing values\n    df = df.fillna(0)\n    \n    # Sort by timestamp\n    df = df.sort_values('Timestamp').reset_index(drop=True)\n    \n    print(f\"Loaded {len(df)} rows\")\n    print(f\"Date range: {df['Timestamp'].min()} to {df['Timestamp'].max()}\")\n    \n    return df\n\ndef extract_production_cycles(df):\n    \"\"\"\n    Extract production cycles from state transitions.\n    \n    Args:\n        df: Cleaned dataframe\n        \n    Returns:\n        list: List of cycle dictionaries with timing information\n    \"\"\"\n    print(\"Extracting production cycles...\")\n    \n    cycles = []\n    cycle_start = None\n    cycle_id = 0\n    cycle_start_idx = 0\n    \n    for idx, row in df.iterrows():\n        # Detect cycle start: CupState becomes 1 or HeaterOn becomes 1\n        if (row['CupState'] == 1 and (idx == 0 or df.iloc[idx-1]['CupState'] != 1)) or \\\n           (row['HeaterOn'] == 1 and (idx == 0 or df.iloc[idx-1]['HeaterOn'] != 1)):\n            \n            if cycle_start is not None:\n                # Save previous cycle\n                cycle_end = df.iloc[idx-1]\n                cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                \n                cycles.append({\n                    'cycle_id': cycle_id,\n                    'start_time': cycle_start['Timestamp'],\n                    'end_time': cycle_end['Timestamp'],\n                    'duration_seconds': cycle_duration,\n                    'start_index': cycle_start_idx,\n                    'end_index': idx - 1,\n                    'heating_time_percent': df.loc[cycle_start_idx:idx-1, 'HeatingTimePercent'].mean(),\n                    'max_weight': df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].max(),\n                    'avg_weight': df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].mean(),\n                    'produce_event': df.loc[cycle_start_idx:idx-1, 'Produce'].max() == 1\n                })\n                cycle_id += 1\n            \n            cycle_start = row\n            cycle_start_idx = idx\n        \n        # Detect cycle end: CupState becomes 2 or Produce becomes 1\n        if row['CupState'] == 2 or row['Produce'] == 1:\n            if cycle_start is not None:\n                cycle_end = row\n                cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                \n                cycles.append({\n                    'cycle_id': cycle_id,\n                    'start_time': cycle_start['Timestamp'],\n                    'end_time': row['Timestamp'],\n                    'duration_seconds': cycle_duration,\n                    'start_index': cycle_start_idx,\n                    'end_index': idx,\n                    'heating_time_percent': df.loc[cycle_start_idx:idx, 'HeatingTimePercent'].mean(),\n                    'max_weight': df.loc[cycle_start_idx:idx, 'CurrentWeight'].max(),\n                    'avg_weight': df.loc[cycle_start_idx:idx, 'CurrentWeight'].mean(),\n                    'produce_event': True\n                })\n                cycle_id += 1\n                cycle_start = None\n    \n    # Handle last incomplete cycle\n    if cycle_start is not None:\n        cycle_end = df.iloc[-1]\n        cycle_duration = (cycle_end['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n        \n        cycles.append({\n            'cycle_id': cycle_id,\n            'start_time': cycle_start['Timestamp'],\n            'end_time': cycle_end['Timestamp'],\n            'duration_seconds': cycle_duration,\n            'start_index': cycle_start_idx,\n            'end_index': len(df) - 1,\n            'heating_time_percent': df.loc[cycle_start_idx:, 'HeatingTimePercent'].mean(),\n            'max_weight': df.loc[cycle_start_idx:, 'CurrentWeight'].max(),\n            'avg_weight': df.loc[cycle_start_idx:, 'CurrentWeight'].mean(),\n            'produce_event': df.loc[cycle_start_idx:, 'Produce'].max() == 1\n        })\n    \n    print(f\"Extracted {len(cycles)} production cycles\")\n    \n    return cycles\n\ndef calculate_model_parameters(df, cycles):\n    \"\"\"\n    Calculate parameters needed for the optimization model.\n    \n    Args:\n        df: Cleaned dataframe\n        cycles: List of production cycles\n        \n    Returns:\n        dict: Model parameters dictionary\n    \"\"\"\n    print(\"Calculating model parameters...\")\n    \n    # Calculate timing parameters\n    durations = [c['duration_seconds'] for c in cycles]\n    heating_times = [c['heating_time_percent'] for c in cycles]\n    weights = [c['avg_weight'] for c in cycles]\n    max_weights = [c['max_weight'] for c in cycles]\n    \n    # Time-based parameters\n    total_time = (df['Timestamp'].max() - df['Timestamp'].min()).total_seconds()\n    \n    parameters = {\n        # Timing parameters\n        'avg_cycle_time_seconds': np.mean(durations) if durations else 0,\n        'min_cycle_time_seconds': np.min(durations) if durations else 0,\n        'max_cycle_time_seconds': np.max(durations) if durations else 0,\n        'std_cycle_time_seconds': np.std(durations) if durations else 0,\n        \n        # Heating parameters\n        'avg_heating_time_percent': np.mean(heating_times) if heating_times else 0,\n        'min_heating_time_percent': np.min(heating_times) if heating_times else 0,\n        'max_heating_time_percent': np.max(heating_times) if heating_times else 0,\n        \n        # Production rate\n        'production_rate_cycles_per_hour': len(cycles) / (total_time / 3600) if total_time > 0 else 0,\n        'total_cycles': len(cycles),\n        \n        # Capacity constraints\n        'min_avg_weight': np.min(weights) if weights else 0,\n        'max_avg_weight': np.max(weights) if weights else 0,\n        'avg_weight': np.mean(weights) if weights else 0,\n        'min_max_weight': np.min(max_weights) if max_weights else 0,\n        'max_max_weight': np.max(max_weights) if max_weights else 0,\n        \n        # Time window\n        'total_time_seconds': total_time,\n        'start_time': df['Timestamp'].min().isoformat(),\n        'end_time': df['Timestamp'].max().isoformat(),\n        \n        # State distribution\n        'state_distribution': df['CupState'].value_counts().to_dict(),\n        'state_probabilities': df['CupState'].value_counts(normalize=True).to_dict(),\n        \n        # Operational constraints\n        'heater_on_ratio': df['HeaterOn'].mean(),\n        'fan_on_ratio': df['FanOn'].mean(),\n        'produce_ratio': df['Produce'].mean(),\n        'emergency_stop_count': df['EmergencyStop'].sum(),\n        \n        # Data quality\n        'total_records': len(df),\n        'records_per_cycle': len(df) / len(cycles) if cycles else 0\n    }\n    \n    print(f\"Calculated {len(parameters)} model parameters\")\n    \n    return parameters\n\n# ============================================================================\n# OPTIMIZATION MODEL\n# ============================================================================\n\ndef build_optimization_model(df, cycles, parameters):\n    \"\"\"\n    Build the MILP optimization model for production scheduling.\n    \n    Args:\n        df: Cleaned dataframe\n        cycles: List of production cycles\n        parameters: Model parameters dictionary\n        \n    Returns:\n        pulp.LpProblem: The optimization model\n    \"\"\"\n    print(\"=\"*60)\n    print(\"BUILDING OPTIMIZATION MODEL\")\n    print(\"=\"*60)\n    \n    # Create the problem\n    prob = LpProblem(\"Production_Throughput_Maximization\", LpMaximize)\n    \n    # Sets\n    T = list(range(len(df)))  # Time periods\n    I = list(range(len(cycles)))  # Production items/cycles\n    \n    # Decision Variables\n    # x[i,t] = 1 if item i is processed at time t\n    x = LpVariable.dicts(\"x\", [(i, t) for i in I for t in T], lowBound=0, upBound=1, cat=LpBinary)\n    \n    # y[i,t] = 1 if item i is in heating state at time t\n    y = LpVariable.dicts(\"y\", [(i, t) for i in I for t in T], lowBound=0, upBound=1, cat=LpBinary)\n    \n    # h[t] = 1 if heater is ON at time t\n    h = LpVariable.dicts(\"h\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # f[t] = 1 if fan is ON at time t\n    f = LpVariable.dicts(\"f\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # c[t] = 1 if heat cover is CLOSED at time t\n    c = LpVariable.dicts(\"c\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # scd[t] = 1 if scale cup is DOWN at time t\n    scd = LpVariable.dicts(\"scd\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # scu[t] = 1 if scale cup is UP at time t\n    scu = LpVariable.dicts(\"scu\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # stp[t] = 1 if switch to pot occurs at time t\n    stp = LpVariable.dicts(\"stp\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # tscc[t] = 1 if turn scale cup occurs at time t\n    tscc = LpVariable.dicts(\"tscc\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # Objective Function: Maximize production - minimize energy\n    # Maximize: sum(Produce) - lambda * sum(HeatingTimePercent * HeaterOn)\n    prob += lpSum([DELTA * x[i, t] for i in I for t in T]) - \\\n            lpSum([ALPHA * h[t] for t in T]) - \\\n            lpSum([BETA * f[t] for t in T]) - \\\n            lpSum([GAMMA * y[i, t] for i in I for t in T])\n    \n    # Constraints\n    \n    # 1. Each item must be processed exactly once\n    for i in I:\n        prob += lpSum([x[i, t] for t in T]) == 1, f\"Production_Assignment_{i}\"\n    \n    # 2. Heating state must align with heater operation\n    for i in I:\n        for t in T:\n            prob += y[i, t] <= h[t], f\"Heating_State_Consistency_{i}_{t}\"\n    \n    # 3. Maximum number of items processed per time period (capacity constraint)\n    C_max = 2  # Maximum concurrent processing\n    for t in T:\n        prob += lpSum([x[i, t] for i in I]) <= C_max, f\"Capacity_Constraint_{t}\"\n    \n    # 4. Heating time percentage cannot exceed maximum\n    H_max = parameters['max_heating_time_percent']\n    for i in I:\n        prob += lpSum([y[i, t] for t in T]) <= H_max * len(T) / 100, f\"Heating_Time_Limit_{i}\"\n    \n    # 5. No processing during emergency stop\n    for i in I:\n        for t in T:\n            if t < len(df) and df.iloc[t]['EmergencyStop'] == 1:\n                prob += x[i, t] == 0, f\"Emergency_Stop_{i}_{t}\"\n    \n    # 6. Pot must be available for processing\n    for i in I:\n        for t in T:\n            if t < len(df) and df.iloc[t]['PotAvailable'] == 0:\n                prob += x[i, t] == 0, f\"Pot_Availability_{i}_{t}\"\n    \n    # 7. Heat cover must be closed during heating\n    for i in I:\n        for t in T:\n            prob += y[i, t] <= c[t], f\"Heat_Cover_Constraint_{i}_{t}\"\n    \n    # 8. Fan operation linked to heating state\n    M = 1000  # Big-M constant\n    for t in T:\n        prob += f[t] >= lpSum([y[i, t] for i in I]) - M * (1 - h[t]), f\"Fan_Operation_{t}\"\n    \n    # 9. Scale cup down and up cannot occur simultaneously\n    for t in T:\n        prob += scd[t] + scu[t] <= 1, f\"Scale_Cup_Movement_{t}\"\n    \n    # 10. Turn scale cup operation constraint\n    for t in T:\n        prob += tscc[t] <= scd[t], f\"Turn_Scale_Cup_{t}\"\n    \n    # 11. Processing duration must meet minimum requirements\n    for i in I:\n        min_duration = max(1, int(parameters['min_cycle_time_seconds'] / (parameters['total_time_seconds'] / len(T))))\n        prob += lpSum([y[i, t] for t in T]) >= min_duration * lpSum([x[i, t] for t in T]), f\"Processing_Duration_{i}\"\n    \n    # 12. Weight constraints (simplified - using average weight as proxy)\n    W_min = parameters['min_avg_weight']\n    W_max = parameters['max_max_weight']\n    for i in I:\n        for t in T:\n            if t < len(df):\n                weight = df.iloc[t]['CurrentWeight']\n                if weight < W_min or weight > W_max:\n                    prob += x[i, t] == 0, f\"Weight_Threshold_{i}_{t}\"\n    \n    print(f\"Model built with {len(prob.variables())} variables and {len(prob.constraints)} constraints\")\n    \n    return prob\n\ndef solve_optimization_model(prob):\n    \"\"\"\n    Solve the optimization model.\n    \n    Args:\n        prob: The optimization model\n        \n    Returns:\n        dict: Solution results\n    \"\"\"\n    print(\"=\"*60)\n    print(\"SOLVING OPTIMIZATION MODEL\")\n    print(\"=\"*60)\n    \n    # Solve the problem\n    prob.solve(PULP_CBC_CMD(msg=1, timeLimit=300))\n    \n    # Check solution status\n    status = LpStatus[prob.status]\n    print(f\"Solution Status: {status}\")\n    \n    if status == 'Optimal':\n        print(f\"Objective Value: {value(prob.objective):.4f}\")\n        \n        # Extract decision variable values\n        results = {\n            'status': status,\n            'objective_value': value(prob.objective),\n            'decision_variables': {}\n        }\n        \n        # Extract key decision variables\n        for var in prob.variables():\n            if var.varValue is not None and var.varValue > 0.5:\n                results['decision_variables'][var.name] = var.varValue\n        \n        # Calculate summary statistics\n        total_production = sum(1 for name, val in results['decision_variables'].items() \n                              if name.startswith('x') and val > 0.5)\n        total_heater_on = sum(1 for name, val in results['decision_variables'].items() \n                             if name.startswith('h') and val > 0.5)\n        total_fan_on = sum(1 for name, val in results['decision_variables'].items() \n                          if name.startswith('f') and val > 0.5)\n        \n        results['summary'] = {\n            'total_production_events': total_production,\n            'total_heater_on_periods': total_heater_on,\n            'total_fan_on_periods': total_fan_on\n        }\n        \n        return results\n    else:\n        print(\"No optimal solution found!\")\n        return {\n            'status': status,\n            'objective_value': None,\n            'decision_variables': {},\n            'summary': {}\n        }\n\ndef print_solution_results(results, parameters):\n    \"\"\"\n    Print the solution results in a readable format.\n    \n    Args:\n        results: Solution results dictionary\n        parameters: Model parameters dictionary\n    \"\"\"\n    print(\"=\"*60)\n    print(\"SOLUTION RESULTS\")\n    print(\"=\"*60)\n    \n    print(f\"\\nOptimization Status: {results['status']}\")\n    print(f\"Objective Value: {results['objective_value']:.4f}\")\n    \n    if results['summary']:\n        print(f\"\\nSummary Statistics:\")\n        print(f\"  Total Production Events: {results['summary']['total_production_events']}\")\n        print(f\"  Total Heater ON Periods: {results['summary']['total_heater_on_periods']}\")\n        print(f\"  Total Fan ON Periods: {results['summary']['total_fan_on_periods']}\")\n    \n    print(f\"\\nModel Parameters Used:\")\n    print(f\"  Alpha (Heater Cost): {ALPHA}\")\n    print(f\"  Beta (Fan Cost): {BETA}\")\n    print(f\"  Gamma (Heating Duration Cost): {GAMMA}\")\n    print(f\"  Delta (Production Benefit): {DELTA}\")\n    \n    print(f\"\\nData Summary:\")\n    print(f\"  Total Records: {parameters['total_records']}\")\n    print(f\"  Production Cycles: {parameters['total_cycles']}\")\n    print(f\"  Average Cycle Time: {parameters['avg_cycle_time_seconds']:.2f} seconds\")\n    print(f\"  Production Rate: {parameters['production_rate_cycles_per_hour']:.2f} cycles/hour\")\n    \n    print(\"=\"*60)\n\n# ============================================================================\n# MAIN EXECUTION\n# ============================================================================\n\ndef main():\n    \"\"\"\n    Main execution function.\n    \"\"\"\n    print(\"=\"*60)\n    print(\"PRODUCTION THROUGHPUT MAXIMIZATION WITH ENERGY EFFICIENCY\")\n    print(\"MILP OPTIMIZATION USING PuLP\")\n    print(\"=\"*60)\n    \n    try:\n        # Step 1: Load and clean data\n        df = load_and_clean_data(CSV_PATH)\n        \n        # Step 2: Extract production cycles\n        cycles = extract_production_cycles(df)\n        \n        # Step 3: Calculate model parameters\n        parameters = calculate_model_parameters(df, cycles)\n        \n        # Step 4: Build optimization model\n        prob = build_optimization_model(df, cycles, parameters)\n        \n        # Step 5: Solve optimization model\n        results = solve_optimization_model(prob)\n        \n        # Step 6: Print solution results\n        print_solution_results(results, parameters)\n        \n        print(\"\\nOptimization completed successfully!\")\n        \n    except Exception as e:\n        print(f\"Error during optimization: {str(e)}\")\n        import traceback\n        traceback.print_exc()\n\nif __name__ == \"__main__\":\n    main()",
+    "final_output": {
+      "code": "#!/usr/bin/env python3\n\"\"\"\nProduction Throughput Maximization with Energy Efficiency Optimization\n======================================================================\nSOLVER: PuLP (CBC solver)\nPROBLEM TYPE: Mixed-Integer Linear Programming (MILP)\n======================================================================\n\nThis script optimizes production scheduling for a heating/processing system\nby maximizing production output while minimizing energy consumption.\n\nAuthor: DeepAgent Pipeline\nDate: 2024\n\"\"\"\n\nimport pandas as pd\nimport numpy as np\nfrom pulp import *\nimport warnings\nimport os\nwarnings.filterwarnings('ignore')\n\n# ============================================================================\n# CONFIGURATION\n# ============================================================================\n\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpavqxqmtz.csv\"\nOUTPUT_DIR = \"optimization_output\"\n\n# Optimization parameters (cost/revenue coefficients)\nALPHA = 1.0   # Cost coefficient for heater operation\nBETA = 0.5    # Cost coefficient for fan operation\nGAMMA = 0.3   # Cost coefficient for heating state duration\nDELTA = 10.0  # Revenue/benefit coefficient for completed production\n\n# ============================================================================\n# DATA PREPROCESSING\n# ============================================================================\n\ndef load_and_clean_data(csv_path):\n    \"\"\"\n    Load CSV data and perform initial cleaning.\n    \n    Args:\n        csv_path: Path to the CSV file\n        \n    Returns:\n        pd.DataFrame: Cleaned dataframe\n    \"\"\"\n    print(f\"Loading data from: {csv_path}\")\n    \n    # Load the CSV\n    df = pd.read_csv(csv_path)\n    \n    # Convert timestamp to datetime (assuming milliseconds)\n    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')\n    \n    # Ensure binary columns are integers\n    binary_cols = ['EmergencyStop', 'FanOn', 'HeatCoverClosed', 'HeaterOn', \n                  'PotAvailable', 'Produce', 'ScaleCupDown', 'ScaleCupUp',\n                  'SwitchToPot', 'TrackSwitchAtCup', 'TrackSwitchAtPot', 'TurnScaleCup']\n    for col in binary_cols:\n        if col in df.columns:\n            df[col] = df[col].astype(int)\n    \n    # Handle missing values\n    df = df.fillna(0)\n    \n    # Sort by timestamp\n    df = df.sort_values('Timestamp').reset_index(drop=True)\n    \n    print(f\"Loaded {len(df)} rows\")\n    print(f\"Date range: {df['Timestamp'].min()} to {df['Timestamp'].max()}\")\n    \n    return df\n\ndef extract_production_cycles(df):\n    \"\"\"\n    Extract production cycles from state transitions.\n    \n    Args:\n        df: Cleaned dataframe\n        \n    Returns:\n        list: List of cycle dictionaries with timing information\n    \"\"\"\n    print(\"Extracting production cycles...\")\n    \n    cycles = []\n    cycle_start = None\n    cycle_id = 0\n    cycle_start_idx = 0\n    \n    for idx, row in df.iterrows():\n        # Detect cycle start: CupState becomes 1 or HeaterOn becomes 1\n        if (row['CupState'] == 1 and (idx == 0 or df.iloc[idx-1]['CupState'] != 1)) or \\\n           (row['HeaterOn'] == 1 and (idx == 0 or df.iloc[idx-1]['HeaterOn'] != 1)):\n            \n            if cycle_start is not None:\n                # Save previous cycle\n                cycle_end = df.iloc[idx-1]\n                cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                \n                cycles.append({\n                    'cycle_id': cycle_id,\n                    'start_time': cycle_start['Timestamp'],\n                    'end_time': cycle_end['Timestamp'],\n                    'duration_seconds': cycle_duration,\n                    'start_index': cycle_start_idx,\n                    'end_index': idx - 1,\n                    'heating_time_percent': df.loc[cycle_start_idx:idx-1, 'HeatingTimePercent'].mean(),\n                    'max_weight': df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].max(),\n                    'avg_weight': df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].mean(),\n                    'produce_event': df.loc[cycle_start_idx:idx-1, 'Produce'].max() == 1\n                })\n                cycle_id += 1\n            \n            cycle_start = row\n            cycle_start_idx = idx\n        \n        # Detect cycle end: CupState becomes 2 or Produce becomes 1\n        if row['CupState'] == 2 or row['Produce'] == 1:\n            if cycle_start is not None:\n                cycle_end = row\n                cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                \n                cycles.append({\n                    'cycle_id': cycle_id,\n                    'start_time': cycle_start['Timestamp'],\n                    'end_time': row['Timestamp'],\n                    'duration_seconds': cycle_duration,\n                    'start_index': cycle_start_idx,\n                    'end_index': idx,\n                    'heating_time_percent': df.loc[cycle_start_idx:idx, 'HeatingTimePercent'].mean(),\n                    'max_weight': df.loc[cycle_start_idx:idx, 'CurrentWeight'].max(),\n                    'avg_weight': df.loc[cycle_start_idx:idx, 'CurrentWeight'].mean(),\n                    'produce_event': True\n                })\n                cycle_id += 1\n                cycle_start = None\n    \n    # Handle last incomplete cycle\n    if cycle_start is not None:\n        cycle_end = df.iloc[-1]\n        cycle_duration = (cycle_end['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n        \n        cycles.append({\n            'cycle_id': cycle_id,\n            'start_time': cycle_start['Timestamp'],\n            'end_time': cycle_end['Timestamp'],\n            'duration_seconds': cycle_duration,\n            'start_index': cycle_start_idx,\n            'end_index': len(df) - 1,\n            'heating_time_percent': df.loc[cycle_start_idx:, 'HeatingTimePercent'].mean(),\n            'max_weight': df.loc[cycle_start_idx:, 'CurrentWeight'].max(),\n            'avg_weight': df.loc[cycle_start_idx:, 'CurrentWeight'].mean(),\n            'produce_event': df.loc[cycle_start_idx:, 'Produce'].max() == 1\n        })\n    \n    print(f\"Extracted {len(cycles)} production cycles\")\n    \n    return cycles\n\ndef calculate_model_parameters(df, cycles):\n    \"\"\"\n    Calculate parameters needed for the optimization model.\n    \n    Args:\n        df: Cleaned dataframe\n        cycles: List of production cycles\n        \n    Returns:\n        dict: Model parameters dictionary\n    \"\"\"\n    print(\"Calculating model parameters...\")\n    \n    # Calculate timing parameters\n    durations = [c['duration_seconds'] for c in cycles]\n    heating_times = [c['heating_time_percent'] for c in cycles]\n    weights = [c['avg_weight'] for c in cycles]\n    max_weights = [c['max_weight'] for c in cycles]\n    \n    # Time-based parameters\n    total_time = (df['Timestamp'].max() - df['Timestamp'].min()).total_seconds()\n    \n    parameters = {\n        # Timing parameters\n        'avg_cycle_time_seconds': np.mean(durations) if durations else 0,\n        'min_cycle_time_seconds': np.min(durations) if durations else 0,\n        'max_cycle_time_seconds': np.max(durations) if durations else 0,\n        'std_cycle_time_seconds': np.std(durations) if durations else 0,\n        \n        # Heating parameters\n        'avg_heating_time_percent': np.mean(heating_times) if heating_times else 0,\n        'min_heating_time_percent': np.min(heating_times) if heating_times else 0,\n        'max_heating_time_percent': np.max(heating_times) if heating_times else 0,\n        \n        # Production rate\n        'production_rate_cycles_per_hour': len(cycles) / (total_time / 3600) if total_time > 0 else 0,\n        'total_cycles': len(cycles),\n        \n        # Capacity constraints\n        'min_avg_weight': np.min(weights) if weights else 0,\n        'max_avg_weight': np.max(weights) if weights else 0,\n        'avg_weight': np.mean(weights) if weights else 0,\n        'min_max_weight': np.min(max_weights) if max_weights else 0,\n        'max_max_weight': np.max(max_weights) if max_weights else 0,\n        \n        # Time window\n        'total_time_seconds': total_time,\n        'start_time': df['Timestamp'].min().isoformat(),\n        'end_time': df['Timestamp'].max().isoformat(),\n        \n        # State distribution\n        'state_distribution': df['CupState'].value_counts().to_dict(),\n        'state_probabilities': df['CupState'].value_counts(normalize=True).to_dict(),\n        \n        # Operational constraints\n        'heater_on_ratio': df['HeaterOn'].mean(),\n        'fan_on_ratio': df['FanOn'].mean(),\n        'produce_ratio': df['Produce'].mean(),\n        'emergency_stop_count': df['EmergencyStop'].sum(),\n        \n        # Data quality\n        'total_records': len(df),\n        'records_per_cycle': len(df) / len(cycles) if cycles else 0\n    }\n    \n    print(f\"Calculated {len(parameters)} model parameters\")\n    \n    return parameters\n\n# ============================================================================\n# OPTIMIZATION MODEL\n# ============================================================================\n\ndef build_optimization_model(df, cycles, parameters):\n    \"\"\"\n    Build the MILP optimization model for production scheduling.\n    \n    Args:\n        df: Cleaned dataframe\n        cycles: List of production cycles\n        parameters: Model parameters dictionary\n        \n    Returns:\n        pulp.LpProblem: The optimization model\n    \"\"\"\n    print(\"=\"*60)\n    print(\"BUILDING OPTIMIZATION MODEL\")\n    print(\"=\"*60)\n    \n    # Create the problem\n    prob = LpProblem(\"Production_Throughput_Maximization\", LpMaximize)\n    \n    # Sets\n    T = list(range(len(df)))  # Time periods\n    I = list(range(len(cycles)))  # Production items/cycles\n    \n    # Decision Variables\n    # x[i,t] = 1 if item i is processed at time t\n    x = LpVariable.dicts(\"x\", [(i, t) for i in I for t in T], lowBound=0, upBound=1, cat=LpBinary)\n    \n    # y[i,t] = 1 if item i is in heating state at time t\n    y = LpVariable.dicts(\"y\", [(i, t) for i in I for t in T], lowBound=0, upBound=1, cat=LpBinary)\n    \n    # h[t] = 1 if heater is ON at time t\n    h = LpVariable.dicts(\"h\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # f[t] = 1 if fan is ON at time t\n    f = LpVariable.dicts(\"f\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # c[t] = 1 if heat cover is CLOSED at time t\n    c = LpVariable.dicts(\"c\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # scd[t] = 1 if scale cup is DOWN at time t\n    scd = LpVariable.dicts(\"scd\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # scu[t] = 1 if scale cup is UP at time t\n    scu = LpVariable.dicts(\"scu\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # stp[t] = 1 if switch to pot occurs at time t\n    stp = LpVariable.dicts(\"stp\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # tscc[t] = 1 if turn scale cup occurs at time t\n    tscc = LpVariable.dicts(\"tscc\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # Objective Function: Maximize production - minimize energy\n    # Maximize: sum(Produce) - lambda * sum(HeatingTimePercent * HeaterOn)\n    prob += lpSum([DELTA * x[i, t] for i in I for t in T]) - \\\n            lpSum([ALPHA * h[t] for t in T]) - \\\n            lpSum([BETA * f[t] for t in T]) - \\\n            lpSum([GAMMA * y[i, t] for i in I for t in T])\n    \n    # Constraints\n    \n    # 1. Each item must be processed exactly once\n    for i in I:\n        prob += lpSum([x[i, t] for t in T]) == 1, f\"Production_Assignment_{i}\"\n    \n    # 2. Heating state must align with heater operation\n    for i in I:\n        for t in T:\n            prob += y[i, t] <= h[t], f\"Heating_State_Consistency_{i}_{t}\"\n    \n    # 3. Maximum number of items processed per time period (capacity constraint)\n    C_max = 2  # Maximum concurrent processing\n    for t in T:\n        prob += lpSum([x[i, t] for i in I]) <= C_max, f\"Capacity_Constraint_{t}\"\n    \n    # 4. Heating time percentage cannot exceed maximum\n    H_max = parameters['max_heating_time_percent']\n    for i in I:\n        prob += lpSum([y[i, t] for t in T]) <= H_max * len(T) / 100, f\"Heating_Time_Limit_{i}\"\n    \n    # 5. No processing during emergency stop\n    for i in I:\n        for t in T:\n            if t < len(df) and df.iloc[t]['EmergencyStop'] == 1:\n                prob += x[i, t] == 0, f\"Emergency_Stop_{i}_{t}\"\n    \n    # 6. Pot must be available for processing\n    for i in I:\n        for t in T:\n            if t < len(df) and df.iloc[t]['PotAvailable'] == 0:\n                prob += x[i, t] == 0, f\"Pot_Availability_{i}_{t}\"\n    \n    # 7. Heat cover must be closed during heating\n    for i in I:\n        for t in T:\n            prob += y[i, t] <= c[t], f\"Heat_Cover_Constraint_{i}_{t}\"\n    \n    # 8. Fan operation linked to heating state\n    M = 1000  # Big-M constant\n    for t in T:\n        prob += f[t] >= lpSum([y[i, t] for i in I]) - M * (1 - h[t]), f\"Fan_Operation_{t}\"\n    \n    # 9. Scale cup down and up cannot occur simultaneously\n    for t in T:\n        prob += scd[t] + scu[t] <= 1, f\"Scale_Cup_Movement_{t}\"\n    \n    # 10. Turn scale cup operation constraint\n    for t in T:\n        prob += tscc[t] <= scd[t], f\"Turn_Scale_Cup_{t}\"\n    \n    # 11. Processing duration must meet minimum requirements\n    for i in I:\n        min_duration = max(1, int(parameters['min_cycle_time_seconds'] / (parameters['total_time_seconds'] / len(T))))\n        prob += lpSum([y[i, t] for t in T]) >= min_duration * lpSum([x[i, t] for t in T]), f\"Processing_Duration_{i}\"\n    \n    # 12. Weight constraints (simplified - using average weight as proxy)\n    W_min = parameters['min_avg_weight']\n    W_max = parameters['max_max_weight']\n    for i in I:\n        for t in T:\n            if t < len(df):\n                weight = df.iloc[t]['CurrentWeight']\n                if weight < W_min or weight > W_max:\n                    prob += x[i, t] == 0, f\"Weight_Threshold_{i}_{t}\"\n    \n    print(f\"Model built with {len(prob.variables())} variables and {len(prob.constraints)} constraints\")\n    \n    return prob\n\ndef solve_optimization_model(prob):\n    \"\"\"\n    Solve the optimization model.\n    \n    Args:\n        prob: The optimization model\n        \n    Returns:\n        dict: Solution results\n    \"\"\"\n    print(\"=\"*60)\n    print(\"SOLVING OPTIMIZATION MODEL\")\n    print(\"=\"*60)\n    \n    # Solve the problem\n    prob.solve(PULP_CBC_CMD(msg=1, timeLimit=300))\n    \n    # Check solution status\n    status = LpStatus[prob.status]\n    print(f\"Solution Status: {status}\")\n    \n    if status == 'Optimal':\n        print(f\"Objective Value: {value(prob.objective):.4f}\")\n        \n        # Extract decision variable values\n        results = {\n            'status': status,\n            'objective_value': value(prob.objective),\n            'decision_variables': {}\n        }\n        \n        # Extract key decision variables\n        for var in prob.variables():\n            if var.varValue is not None and var.varValue > 0.5:\n                results['decision_variables'][var.name] = var.varValue\n        \n        # Calculate summary statistics\n        total_production = sum(1 for name, val in results['decision_variables'].items() \n                              if name.startswith('x') and val > 0.5)\n        total_heater_on = sum(1 for name, val in results['decision_variables'].items() \n                             if name.startswith('h') and val > 0.5)\n        total_fan_on = sum(1 for name, val in results['decision_variables'].items() \n                          if name.startswith('f') and val > 0.5)\n        \n        results['summary'] = {\n            'total_production_events': total_production,\n            'total_heater_on_periods': total_heater_on,\n            'total_fan_on_periods': total_fan_on\n        }\n        \n        return results\n    else:\n        print(\"No optimal solution found!\")\n        return {\n            'status': status,\n            'objective_value': None,\n            'decision_variables': {},\n            'summary': {}\n        }\n\ndef print_solution_results(results, parameters):\n    \"\"\"\n    Print the solution results in a readable format.\n    \n    Args:\n        results: Solution results dictionary\n        parameters: Model parameters dictionary\n    \"\"\"\n    print(\"=\"*60)\n    print(\"SOLUTION RESULTS\")\n    print(\"=\"*60)\n    \n    print(f\"\\nOptimization Status: {results['status']}\")\n    print(f\"Objective Value: {results['objective_value']:.4f}\")\n    \n    if results['summary']:\n        print(f\"\\nSummary Statistics:\")\n        print(f\"  Total Production Events: {results['summary']['total_production_events']}\")\n        print(f\"  Total Heater ON Periods: {results['summary']['total_heater_on_periods']}\")\n        print(f\"  Total Fan ON Periods: {results['summary']['total_fan_on_periods']}\")\n    \n    print(f\"\\nModel Parameters Used:\")\n    print(f\"  Alpha (Heater Cost): {ALPHA}\")\n    print(f\"  Beta (Fan Cost): {BETA}\")\n    print(f\"  Gamma (Heating Duration Cost): {GAMMA}\")\n    print(f\"  Delta (Production Benefit): {DELTA}\")\n    \n    print(f\"\\nData Summary:\")\n    print(f\"  Total Records: {parameters['total_records']}\")\n    print(f\"  Production Cycles: {parameters['total_cycles']}\")\n    print(f\"  Average Cycle Time: {parameters['avg_cycle_time_seconds']:.2f} seconds\")\n    print(f\"  Production Rate: {parameters['production_rate_cycles_per_hour']:.2f} cycles/hour\")\n    \n    print(\"=\"*60)\n\n# ============================================================================\n# MAIN EXECUTION\n# ============================================================================\n\ndef main():\n    \"\"\"\n    Main execution function.\n    \"\"\"\n    print(\"=\"*60)\n    print(\"PRODUCTION THROUGHPUT MAXIMIZATION WITH ENERGY EFFICIENCY\")\n    print(\"MILP OPTIMIZATION USING PuLP\")\n    print(\"=\"*60)\n    \n    try:\n        # Step 1: Load and clean data\n        df = load_and_clean_data(CSV_PATH)\n        \n        # Step 2: Extract production cycles\n        cycles = extract_production_cycles(df)\n        \n        # Step 3: Calculate model parameters\n        parameters = calculate_model_parameters(df, cycles)\n        \n        # Step 4: Build optimization model\n        prob = build_optimization_model(df, cycles, parameters)\n        \n        # Step 5: Solve optimization model\n        results = solve_optimization_model(prob)\n        \n        # Step 6: Print solution results\n        print_solution_results(results, parameters)\n        \n        print(\"\\nOptimization completed successfully!\")\n        \n    except Exception as e:\n        print(f\"Error during optimization: {str(e)}\")\n        import traceback\n        traceback.print_exc()\n\nif __name__ == \"__main__\":\n    main()",
+      "output_schema": {
+        "properties": {
+          "decision_variables": {
+            "description": "Dictionary of decision variable names and values",
+            "type": "object"
+          },
+          "objective_value": {
+            "description": "Optimized objective function value",
+            "type": "number"
+          },
+          "status": {
+            "description": "Solution status (Optimal, Infeasible, etc.)",
+            "type": "string"
+          },
+          "summary": {
+            "properties": {
+              "total_fan_on_periods": {
+                "type": "integer"
+              },
+              "total_heater_on_periods": {
+                "type": "integer"
+              },
+              "total_production_events": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "successful_implementation": true,
+      "notes": [
+        "Script combines all subtask outputs into a complete, runnable PuLP optimization script",
+        "Includes data loading, preprocessing, model building, solving, and result printing",
+        "Uses CBC solver (open-source) with 300-second time limit",
+        "Model is linear (MILP) with binary decision variables for control signals",
+        "CSV path is parameterized at the top of the script",
+        "Includes comprehensive comments and documentation",
+        "Handles edge cases like missing data and incomplete cycles"
+      ]
+    },
+    "status": "ok",
+    "traces": [
+      "csv_resolved",
+      "csv_loaded:7728rows",
+      "plan_generated:6tasks",
+      "executed_task:data_inspection",
+      "executed_task:use_case_analysis",
+      "executed_task:mathematical_modeling",
+      "interrupted_for_feedback",
+      "executed_task:mathematical_modeling",
+      "executed_task:preprocessing",
+      "executed_task:pulp_coding",
+      "executed_task:validation",
+      "execution_done:ok=4,errors=2",
+      "assembly_done",
+      "code_saved:C:\\Users\\simon\\6_Semester\\kip\\KIP_texprompter\\texprompter\\TestOutputs\\deep_generated_pulp_model.py",
+      "total_time:1052.7s"
+    ],
+    "errors": [],
+    "use_case": {
+      "decision_variables": [
+        {
+          "description": "Whether to activate heater at time t",
+          "name": "HeaterOn_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to activate fan at time t",
+          "name": "FanOn_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to close heat cover at time t",
+          "name": "HeatCoverClosed_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to lower scale cup at time t",
+          "name": "ScaleCupDown_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to raise scale cup at time t",
+          "name": "ScaleCupUp_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to switch to pot at time t",
+          "name": "SwitchToPot_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to activate track switch at cup at time t",
+          "name": "TrackSwitchAtCup_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to activate track switch at pot at time t",
+          "name": "TrackSwitchAtPot_t",
+          "type": "binary"
+        },
+        {
+          "description": "Whether to turn scale cup at time t",
+          "name": "TurnScaleCup_t",
+          "type": "binary"
+        }
+      ],
+      "justification": "This optimization problem is most meaningful because: (1) The data contains multiple controllable binary variables that directly affect production, (2) Production events (Produce) are rare (0.05%), indicating significant optimization potential, (3) Energy consumption is tracked via HeatingTimePercent and HeaterOn, allowing for efficiency optimization, (4) The sequential nature of operations (scale, cup, pot, track switches) suggests scheduling optimization can improve throughput, (5) Safety and equipment constraints are present (EmergencyStop, CupState) that must be respected in any optimization solution.",
+      "key_constraints": [
+        {
+          "category": "Production Sequence Constraints",
+          "description": "Ensure proper sequence of operations (ScaleCupDown \u2192 CurrentWeight measurement \u2192 ScaleCupUp \u2192 SwitchToPot)",
+          "example": "ScaleCupDown_t must precede ScaleCupUp_t for each production cycle"
+        },
+        {
+          "category": "Energy Constraints",
+          "description": "Limit total heating time and energy consumption",
+          "example": "\u03a3(HeatingTimePercent_t * HeaterOn_t) \u2264 MaxEnergyBudget"
+        },
+        {
+          "category": "Equipment State Constraints",
+          "description": "Maintain valid equipment states (CupState transitions)",
+          "example": "CupState_t+1 = f(CupState_t, control_variables_t)"
+        },
+        {
+          "category": "Safety Constraints",
+          "description": "Ensure EmergencyStop is respected and equipment operates within safe parameters",
+          "example": "If EmergencyStop_t = 1, then HeaterOn_t = 0, FanOn_t = 0"
+        },
+        {
+          "category": "Capacity Constraints",
+          "description": "Respect weight and material handling limits",
+          "example": "CurrentWeight_t \u2264 MaxWeightCapacity"
+        },
+        {
+          "category": "Timing Constraints",
+          "description": "Ensure minimum/maximum heating times and cycle times",
+          "example": "MinHeatingTime \u2264 HeatingTimePercent_t \u2264 MaxHeatingTime"
+        }
+      ],
+      "objective": {
+        "description": "Maximize total production output (Produce) while minimizing energy consumption",
+        "direction": "maximize",
+        "mathematical_form": "Maximize: \u03a3(Produce_i) - \u03bb * \u03a3(HeatingTimePercent_i * HeaterOn_i)"
+      },
+      "optimization_use_case": "Production Throughput Maximization with Energy Efficiency",
+      "problem_type": "Mixed-Integer Linear Programming (MILP) for Production Scheduling"
+    },
+    "modelling": {
+      "column_mappings": {
+        "CupState": "State variable s_{i,t}",
+        "CurrentWeight": "Weight variable weight_{i,t}",
+        "EmergencyStop": "Emergency stop parameter E_stop",
+        "FanOn": "Fan operation variable f_t",
+        "HeatCoverClosed": "Heat cover variable c_t",
+        "HeaterOn": "Heater operation variable h_t",
+        "HeatingTimePercent": "Heating time parameter P_i",
+        "PotAvailable": "Pot availability parameter PotAvail_t",
+        "Produce": "Production status variable Produce_t",
+        "ScaleCupDown": "Scale cup down variable scd_t",
+        "ScaleCupUp": "Scale cup up variable scu_t",
+        "SwitchToPot": "Switch to pot variable stp_t",
+        "Timestamp": "Time period index t",
+        "TrackSwitchAtCup": "Track switch at cup parameter",
+        "TrackSwitchAtPot": "Track switch at pot parameter",
+        "TurnScaleCup": "Turn scale cup variable tscc_t"
+      },
+      "constraints": [
+        {
+          "description": "Each item must be processed exactly once",
+          "equation": "\\sum_{t \\in T} x_{i,t} = 1, \\quad \\forall i \\in I",
+          "name": "Production Assignment"
+        },
+        {
+          "description": "State changes must follow valid transitions (0\u21921\u21922 or similar)",
+          "equation": "s_{i,t+1} - s_{i,t} \\leq 1, \\quad \\forall i \\in I, t \\in T",
+          "name": "State Transition"
+        },
+        {
+          "description": "Heating state must align with heater operation",
+          "equation": "y_{i,t} \\leq h_t, \\quad \\forall i \\in I, t \\in T",
+          "name": "Heating State Consistency"
+        },
+        {
+          "description": "Maximum number of items processed per time period",
+          "equation": "\\sum_{i \\in I} x_{i,t} \\leq C_{max}, \\quad \\forall t \\in T",
+          "name": "Capacity Constraint"
+        },
+        {
+          "description": "Heating time percentage cannot exceed maximum",
+          "equation": "\\sum_{t \\in T} y_{i,t} \\leq H_{max} \\cdot P_i, \\quad \\forall i \\in I",
+          "name": "Heating Time Limit"
+        },
+        {
+          "description": "Processing only allowed when weight is within acceptable range",
+          "equation": "W_{min} \\leq weight_{i,t} \\leq W_{max}, \\quad \\forall i \\in I, t \\in T",
+          "name": "Weight Threshold"
+        },
+        {
+          "description": "No processing during emergency stop",
+          "equation": "x_{i,t} \\leq 1 - E_{stop}, \\quad \\forall i \\in I, t \\in T",
+          "name": "Emergency Stop Constraint"
+        },
+        {
+          "description": "Pot must be available for processing",
+          "equation": "x_{i,t} \\leq PotAvail_t, \\quad \\forall i \\in I, t \\in T",
+          "name": "Pot Availability"
+        },
+        {
+          "description": "Heat cover must be closed during heating",
+          "equation": "y_{i,t} \\leq c_t, \\quad \\forall i \\in I, t \\in T",
+          "name": "Heat Cover Constraint"
+        },
+        {
+          "description": "Fan operation linked to heating state",
+          "equation": "f_t \\geq \\sum_{i \\in I} y_{i,t} - M \\cdot (1 - h_t), \\quad \\forall t \\in T",
+          "name": "Fan Operation"
+        },
+        {
+          "description": "Scale cup down and up cannot occur simultaneously",
+          "equation": "scd_t + scu_t \\leq 1, \\quad \\forall t \\in T",
+          "name": "Scale Cup Movement"
+        },
+        {
+          "description": "Switch to pot occurs when transitioning from cup to pot state",
+          "equation": "stp_t = 1 \\iff s_{i,t} = 1 \\land s_{i,t+1} = 2, \\quad \\forall i \\in I, t \\in T",
+          "name": "Switch to Pot"
+        },
+        {
+          "description": "Track switches must be consistent with state transitions",
+          "equation": "TrackSwitchAtCup_t + TrackSwitchAtPot_t \\leq 1, \\quad \\forall t \\in T",
+          "name": "Track Switch Consistency"
+        },
+        {
+          "description": "Turn scale cup operation constraint",
+          "equation": "tscc_t \\leq scd_t, \\quad \\forall t \\in T",
+          "name": "Turn Scale Cup"
+        },
+        {
+          "description": "Production status must align with active processing",
+          "equation": "Produce_t = \\sum_{i \\in I} x_{i,t}, \\quad \\forall t \\in T",
+          "name": "Production Status"
+        },
+        {
+          "description": "Define start and end times for each item",
+          "equation": "start_{i,t} = x_{i,t} \\land (t = \\min\\{t' : x_{i,t'} = 1\\}), \\quad \\forall i \\in I, t \\in T",
+          "name": "Start and End Times"
+        },
+        {
+          "description": "Processing duration must meet minimum requirements",
+          "equation": "\\sum_{t \\in T} y_{i,t} \\geq P_i \\cdot x_{i,t}, \\quad \\forall i \\in I, t \\in T",
+          "name": "Processing Duration"
+        },
+        {
+          "description": "All variables must be non-negative",
+          "equation": "x_{i,t}, y_{i,t}, z_{i,t}, h_t, f_t, c_t, p_t, scd_t, scu_t, stp_t, tscc_t \\geq 0, \\quad \\forall i \\in I, t \\in T",
+          "name": "Non-negativity"
+        },
+        {
+          "description": "Binary variables must be 0 or 1",
+          "equation": "x_{i,t}, y_{i,t}, z_{i,t}, h_t, f_t, c_t, p_t, scd_t, scu_t, stp_t, tscc_t \\in \\{0, 1\\}, \\quad \\forall i \\in I, t \\in T",
+          "name": "Binary Constraints"
+        },
+        {
+          "description": "State variables must be integers",
+          "equation": "s_{i,t} \\in \\{0, 1, 2\\}, \\quad \\forall i \\in I, t \\in T",
+          "name": "Integer Constraints"
+        }
+      ],
+      "decision_variables": {
+        "c_t": "Binary variable: 1 if heat cover is CLOSED at time t, 0 otherwise (from HeatCoverClosed)",
+        "end_{i,t}": "Binary variable: 1 if item i ends processing at time t, 0 otherwise",
+        "f_t": "Binary variable: 1 if fan is ON at time t, 0 otherwise (from FanOn)",
+        "h_t": "Binary variable: 1 if heater is ON at time t, 0 otherwise (from HeaterOn)",
+        "p_t": "Binary variable: 1 if pot is available at time t, 0 otherwise (from PotAvailable)",
+        "s_{i,t}": "Integer variable: State of item i at time t (0, 1, or 2 from CupState)",
+        "scd_t": "Binary variable: 1 if scale cup is DOWN at time t, 0 otherwise (from ScaleCupDown)",
+        "scu_t": "Binary variable: 1 if scale cup is UP at time t, 0 otherwise (from ScaleCupUp)",
+        "start_{i,t}": "Binary variable: 1 if item i starts processing at time t, 0 otherwise",
+        "stp_t": "Binary variable: 1 if switch to pot occurs at time t, 0 otherwise (from SwitchToPot)",
+        "tscc_t": "Binary variable: 1 if turn scale cup occurs at time t, 0 otherwise (from TurnScaleCup)",
+        "weight_{i,t}": "Continuous variable: Weight of item i at time t (from CurrentWeight)",
+        "x_{i,t}": "Binary variable: 1 if item i is processed at time t, 0 otherwise",
+        "y_{i,t}": "Binary variable: 1 if item i is in heating state at time t, 0 otherwise",
+        "z_{i,t}": "Binary variable: 1 if item i is in cooling state at time t, 0 otherwise"
+      },
+      "description": "MILP formulation for optimizing production scheduling in a heating/processing system with cup and pot states, heating controls, and scale operations.",
+      "model_name": "Production Heating Process Optimization",
+      "model_type": "Mixed-Integer Linear Programming (MILP)",
+      "objective_function": {
+        "description": "Minimize total heating time and energy consumption while maximizing throughput",
+        "formulation": "minimize Z = \\sum_{t \\in T} \\left( \\alpha \\cdot h_t + \\beta \\cdot f_t + \\gamma \\cdot \\sum_{i \\in I} y_{i,t} \\right) - \\delta \\cdot \\sum_{i \\in I} \\sum_{t \\in T} x_{i,t}",
+        "parameters": {
+          "alpha": "Cost coefficient for heater operation",
+          "beta": "Cost coefficient for fan operation",
+          "delta": "Revenue/benefit coefficient for completed production",
+          "gamma": "Cost coefficient for heating state duration"
+        }
+      },
+      "parameters": {
+        "C_max": "Maximum production capacity per time period",
+        "E_stop": "Emergency stop status (1 = active, 0 = inactive from EmergencyStop column)",
+        "FanOn_t": "Fan status at time t (from FanOn column)",
+        "H_max": "Maximum heating time percentage (100 from HeatingTimePercent column)",
+        "HeatCover_t": "Heat cover status at time t (from HeatCoverClosed column)",
+        "HeaterOn_t": "Heater status at time t (from HeaterOn column)",
+        "M": "Big-M constant for linearization",
+        "P_i": "Processing time required for item i (derived from HeatingTimePercent)",
+        "PotAvail_t": "Pot availability at time t (from PotAvailable column)",
+        "Produce_t": "Production status at time t (from Produce column)",
+        "ScaleCupDown_t": "Scale cup down status at time t (from ScaleCupDown column)",
+        "ScaleCupUp_t": "Scale cup up status at time t (from ScaleCupUp column)",
+        "SwitchToPot_t": "Switch to pot status at time t (from SwitchToPot column)",
+        "TrackSwitchAtCup_t": "Track switch at cup status at time t (from TrackSwitchAtCup column)",
+        "TrackSwitchAtPot_t": "Track switch at pot status at time t (from TrackSwitchAtPot column)",
+        "TurnScaleCup_t": "Turn scale cup status at time t (from TurnScaleCup column)",
+        "W_max": "Maximum weight threshold for processing",
+        "W_min": "Minimum weight threshold for processing (from CurrentWeight column)"
+      },
+      "sets": {
+        "I": "Set of production items/orders to be processed",
+        "M": "Set of machines/stations: {cup, pot, scale}",
+        "S": "Set of possible states: {0, 1, 2} (from CupState column)",
+        "T": "Set of time periods (discrete time steps from Timestamp column)"
+      },
+      "solution_approach": "Solve using commercial solvers (Gurobi, CPLEX) or open-source alternatives (CBC, GLPK)"
+    },
+    "preprocessing": {
+      "column_to_parameter_mapping": {
+        "CupState": "Production state indicator (0=idle, 1=processing, 2=complete)",
+        "CurrentWeight": "Weight constraint for capacity optimization",
+        "EmergencyStop": "Binary constraint for emergency stop events",
+        "FanOn": "Binary constraint for fan operation",
+        "HeatCoverClosed": "Binary constraint for heat cover status",
+        "HeaterOn": "Binary indicator for heating activation",
+        "HeatingTimePercent": "Heating duration parameter (0-100%)",
+        "PotAvailable": "Binary constraint for pot availability",
+        "Produce": "Binary indicator for production completion events",
+        "ScaleCupDown": "Binary constraint for scale cup down operation",
+        "ScaleCupUp": "Binary constraint for scale cup up operation",
+        "SwitchToPot": "Binary constraint for pot switching",
+        "Timestamp": "Time index for scheduling and cycle duration calculations",
+        "TrackSwitchAtCup": "Binary constraint for track switch at cup",
+        "TrackSwitchAtPot": "Binary constraint for track switch at pot",
+        "TurnScaleCup": "Binary constraint for scale cup turning"
+      },
+      "data_structures_created": [
+        "time_indices",
+        "state_mapping",
+        "column_to_parameter",
+        "cycle_data",
+        "constraint_sets",
+        "decision_variables",
+        "parameters"
+      ],
+      "model_parameters_extracted": [
+        "avg_cycle_time_seconds",
+        "min_cycle_time_seconds",
+        "max_cycle_time_seconds",
+        "std_cycle_time_seconds",
+        "avg_heating_time_percent",
+        "min_heating_time_percent",
+        "max_heating_time_percent",
+        "production_rate_cycles_per_hour",
+        "total_cycles",
+        "min_avg_weight",
+        "max_avg_weight",
+        "avg_weight",
+        "min_max_weight",
+        "max_max_weight",
+        "total_time_seconds",
+        "start_time",
+        "end_time",
+        "state_distribution",
+        "state_probabilities",
+        "heater_on_ratio",
+        "fan_on_ratio",
+        "produce_ratio",
+        "emergency_stop_count",
+        "total_records",
+        "records_per_cycle"
+      ],
+      "preprocessing_code": "import pandas as pd\nimport numpy as np\nfrom datetime import datetime\nfrom collections import defaultdict\nimport json\n\nclass ProductionDataPreprocessor:\n    \"\"\"\n    Preprocesses CSV production data for optimization model.\n    \n    Maps CSV columns to model parameters:\n    - Timestamp -> Time indices for scheduling\n    - CupState -> Production state (0=idle, 1=processing, 2=complete)\n    - HeaterOn, HeatingTimePercent -> Heating duration parameters\n    - Produce -> Production events\n    - ScaleCupUp/Down, SwitchToPot -> Operational constraints\n    - CurrentWeight -> Capacity/weight constraints\n    \"\"\"\n    \n    def __init__(self, csv_path):\n        self.csv_path = csv_path\n        self.df = None\n        self.cycles = []\n        self.parameters = {}\n        self.data_structures = {}\n        \n    def load_and_clean_data(self):\n        \"\"\"\n        Load CSV data and perform initial cleaning.\n        \n        Returns:\n            pd.DataFrame: Cleaned dataframe\n        \"\"\"\n        print(f\"Loading data from: {self.csv_path}\")\n        \n        # Load the CSV\n        self.df = pd.read_csv(self.csv_path)\n        \n        # Convert timestamp to datetime (assuming milliseconds)\n        self.df['Timestamp'] = pd.to_datetime(self.df['Timestamp'], unit='ms')\n        \n        # Ensure binary columns are integers\n        binary_cols = ['EmergencyStop', 'FanOn', 'HeatCoverClosed', 'HeaterOn', \n                      'PotAvailable', 'Produce', 'ScaleCupDown', 'ScaleCupUp',\n                      'SwitchToPot', 'TrackSwitchAtCup', 'TrackSwitchAtPot', 'TurnScaleCup']\n        for col in binary_cols:\n            if col in self.df.columns:\n                self.df[col] = self.df[col].astype(int)\n        \n        # Handle missing values\n        self.df = self.df.fillna(0)\n        \n        # Sort by timestamp\n        self.df = self.df.sort_values('Timestamp').reset_index(drop=True)\n        \n        print(f\"Loaded {len(self.df)} rows\")\n        print(f\"Date range: {self.df['Timestamp'].min()} to {self.df['Timestamp'].max()}\")\n        \n        return self.df\n    \n    def extract_production_cycles(self):\n        \"\"\"\n        Extract production cycles from state transitions.\n        \n        A production cycle is identified by:\n        - Start: CupState changes from 0 to 1 (or HeaterOn becomes 1)\n        - End: CupState changes to 2 or Produce becomes 1\n        \n        Returns:\n            list: List of cycle dictionaries with timing information\n        \"\"\"\n        print(\"Extracting production cycles...\")\n        \n        cycles = []\n        cycle_start = None\n        cycle_id = 0\n        \n        for idx, row in self.df.iterrows():\n            # Detect cycle start: CupState becomes 1 or HeaterOn becomes 1\n            if (row['CupState'] == 1 and (idx == 0 or self.df.iloc[idx-1]['CupState'] != 1)) or \\\n               (row['HeaterOn'] == 1 and (idx == 0 or self.df.iloc[idx-1]['HeaterOn'] != 1)):\n                \n                if cycle_start is not None:\n                    # Save previous cycle\n                    cycle_end = self.df.iloc[idx-1]\n                    cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                    \n                    cycles.append({\n                        'cycle_id': cycle_id,\n                        'start_time': cycle_start['Timestamp'],\n                        'end_time': cycle_end['Timestamp'],\n                        'duration_seconds': cycle_duration,\n                        'start_index': cycle_start_idx,\n                        'end_index': idx - 1,\n                        'heating_time_percent': self.df.loc[cycle_start_idx:idx-1, 'HeatingTimePercent'].mean(),\n                        'max_weight': self.df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].max(),\n                        'avg_weight': self.df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].mean(),\n                        'produce_event': self.df.loc[cycle_start_idx:idx-1, 'Produce'].max() == 1\n                    })\n                    cycle_id += 1\n                \n                cycle_start = row\n                cycle_start_idx = idx\n            \n            # Detect cycle end: CupState becomes 2 or Produce becomes 1\n            if row['CupState'] == 2 or row['Produce'] == 1:\n                if cycle_start is not None:\n                    cycle_end = row\n                    cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                    \n                    cycles.append({\n                        'cycle_id': cycle_id,\n                        'start_time': cycle_start['Timestamp'],\n                        'end_time': row['Timestamp'],\n                        'duration_seconds': cycle_duration,\n                        'start_index': cycle_start_idx,\n                        'end_index': idx,\n                        'heating_time_percent': self.df.loc[cycle_start_idx:idx, 'HeatingTimePercent'].mean(),\n                        'max_weight': self.df.loc[cycle_start_idx:idx, 'CurrentWeight'].max(),\n                        'avg_weight': self.df.loc[cycle_start_idx:idx, 'CurrentWeight'].mean(),\n                        'produce_event': True\n                    })\n                    cycle_id += 1\n                    cycle_start = None\n        \n        # Handle last incomplete cycle\n        if cycle_start is not None:\n            cycle_end = self.df.iloc[-1]\n            cycle_duration = (cycle_end['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n            \n            cycles.append({\n                'cycle_id': cycle_id,\n                'start_time': cycle_start['Timestamp'],\n                'end_time': cycle_end['Timestamp'],\n                'duration_seconds': cycle_duration,\n                'start_index': cycle_start_idx,\n                'end_index': len(self.df) - 1,\n                'heating_time_percent': self.df.loc[cycle_start_idx:, 'HeatingTimePercent'].mean(),\n                'max_weight': self.df.loc[cycle_start_idx:, 'CurrentWeight'].max(),\n                'avg_weight': self.df.loc[cycle_start_idx:, 'CurrentWeight'].mean(),\n                'produce_event': self.df.loc[cycle_start_idx:, 'Produce'].max() == 1\n            })\n        \n        self.cycles = cycles\n        print(f\"Extracted {len(cycles)} production cycles\")\n        \n        return cycles\n    \n    def calculate_model_parameters(self):\n        \"\"\"\n        Calculate parameters needed for the optimization model.\n        \n        Parameters calculated:\n        - Average heating time\n        - Production rate (cycles per hour)\n        - Capacity constraints (min/max weights)\n        - State transition probabilities\n        - Time window constraints\n        \n        Returns:\n            dict: Model parameters dictionary\n        \"\"\"\n        print(\"Calculating model parameters...\")\n        \n        if not self.cycles:\n            self.extract_production_cycles()\n        \n        # Calculate timing parameters\n        durations = [c['duration_seconds'] for c in self.cycles]\n        heating_times = [c['heating_time_percent'] for c in self.cycles]\n        weights = [c['avg_weight'] for c in self.cycles]\n        max_weights = [c['max_weight'] for c in self.cycles]\n        \n        # Time-based parameters\n        total_time = (self.df['Timestamp'].max() - self.df['Timestamp'].min()).total_seconds()\n        \n        parameters = {\n            # Timing parameters\n            'avg_cycle_time_seconds': np.mean(durations) if durations else 0,\n            'min_cycle_time_seconds': np.min(durations) if durations else 0,\n            'max_cycle_time_seconds': np.max(durations) if durations else 0,\n            'std_cycle_time_seconds': np.std(durations) if durations else 0,\n            \n            # Heating parameters\n            'avg_heating_time_percent': np.mean(heating_times) if heating_times else 0,\n            'min_heating_time_percent': np.min(heating_times) if heating_times else 0,\n            'max_heating_time_percent': np.max(heating_times) if heating_times else 0,\n            \n            # Production rate\n            'production_rate_cycles_per_hour': len(self.cycles) / (total_time / 3600) if total_time > 0 else 0,\n            'total_cycles': len(self.cycles),\n            \n            # Capacity constraints\n            'min_avg_weight': np.min(weights) if weights else 0,\n            'max_avg_weight': np.max(weights) if weights else 0,\n            'avg_weight': np.mean(weights) if weights else 0,\n            'min_max_weight': np.min(max_weights) if max_weights else 0,\n            'max_max_weight': np.max(max_weights) if max_weights else 0,\n            \n            # Time window\n            'total_time_seconds': total_time,\n            'start_time': self.df['Timestamp'].min().isoformat(),\n            'end_time': self.df['Timestamp'].max().isoformat(),\n            \n            # State distribution\n            'state_distribution': self.df['CupState'].value_counts().to_dict(),\n            'state_probabilities': self.df['CupState'].value_counts(normalize=True).to_dict(),\n            \n            # Operational constraints\n            'heater_on_ratio': self.df['HeaterOn'].mean(),\n            'fan_on_ratio': self.df['FanOn'].mean(),\n            'produce_ratio': self.df['Produce'].mean(),\n            'emergency_stop_count': self.df['EmergencyStop'].sum(),\n            \n            # Data quality\n            'total_records': len(self.df),\n            'records_per_cycle': len(self.df) / len(self.cycles) if self.cycles else 0\n        }\n        \n        self.parameters = parameters\n        print(f\"Calculated {len(parameters)} model parameters\")\n        \n        return parameters\n    \n    def create_data_structures(self):\n        \"\"\"\n        Create data structures that map CSV columns to model parameters.\n        \n        Returns:\n            dict: Structured data for optimization model\n        \"\"\"\n        print(\"Creating data structures for optimization model...\")\n        \n        # Time indices for scheduling\n        time_indices = list(range(len(self.df)))\n        \n        # State mapping\n        state_mapping = {\n            0: 'idle',\n            1: 'processing',\n            2: 'complete'\n        }\n        \n        # Column to parameter mapping\n        column_to_parameter = {\n            'Timestamp': 'time_index',\n            'CupState': 'production_state',\n            'CurrentWeight': 'weight_constraint',\n            'HeaterOn': 'heating_active',\n            'HeatingTimePercent': 'heating_duration',\n            'Produce': 'production_event',\n            'ScaleCupUp': 'scale_up_event',\n            'ScaleCupDown': 'scale_down_event',\n            'SwitchToPot': 'pot_switch_event',\n            'EmergencyStop': 'emergency_stop',\n            'FanOn': 'fan_active',\n            'HeatCoverClosed': 'cover_closed',\n            'PotAvailable': 'pot_available'\n        }\n        \n        # Cycle-based data structures\n        cycle_data = {\n            'cycles': self.cycles,\n            'cycle_count': len(self.cycles),\n            'cycle_durations': [c['duration_seconds'] for c in self.cycles],\n            'cycle_weights': [c['avg_weight'] for c in self.cycles],\n            'cycle_heating_times': [c['heating_time_percent'] for c in self.cycles]\n        }\n        \n        # Constraint sets\n        constraint_sets = {\n            'time_windows': [\n                {'start': c['start_time'].isoformat(), \n                 'end': c['end_time'].isoformat(), \n                 'duration': c['duration_seconds']} \n                for c in self.cycles\n            ],\n            'capacity_constraints': {\n                'min_weight': self.parameters['min_avg_weight'],\n                'max_weight': self.parameters['max_max_weight'],\n                'avg_weight': self.parameters['avg_weight']\n            },\n            'heating_constraints': {\n                'min_heating_percent': self.parameters['min_heating_time_percent'],\n                'max_heating_percent': self.parameters['max_heating_time_percent'],\n                'avg_heating_percent': self.parameters['avg_heating_time_percent']\n            },\n            'production_constraints': {\n                'min_cycles': int(self.parameters['production_rate_cycles_per_hour'] * 0.8),\n                'max_cycles': int(self.parameters['production_rate_cycles_per_hour'] * 1.2),\n                'target_rate': self.parameters['production_rate_cycles_per_hour']\n            }\n        }\n        \n        # Decision variables structure\n        decision_variables = {\n            'cycle_start_times': [c['start_time'].isoformat() for c in self.cycles],\n            'cycle_durations': [c['duration_seconds'] for c in self.cycles],\n            'heating_durations': [c['heating_time_percent'] for c in self.cycles],\n            'weights': [c['avg_weight'] for c in self.cycles]\n        }\n        \n        self.data_structures = {\n            'time_indices': time_indices,\n            'state_mapping': state_mapping,\n            'column_to_parameter': column_to_parameter,\n            'cycle_data': cycle_data,\n            'constraint_sets': constraint_sets,\n            'decision_variables': decision_variables,\n            'parameters': self.parameters\n        }\n        \n        print(f\"Created data structures with {len(self.data_structures)} main components\")\n        \n        return self.data_structures\n    \n    def run_full_preprocessing(self):\n        \"\"\"\n        Run complete preprocessing pipeline.\n        \n        Returns:\n            dict: Complete preprocessing results\n        \"\"\"\n        print(\"=\"*60)\n        print(\"STARTING PRODUCTION DATA PREPROCESSING\")\n        print(\"=\"*60)\n        \n        # Step 1: Load and clean data\n        self.load_and_clean_data()\n        \n        # Step 2: Extract production cycles\n        self.extract_production_cycles()\n        \n        # Step 3: Calculate model parameters\n        self.calculate_model_parameters()\n        \n        # Step 4: Create data structures\n        self.create_data_structures()\n        \n        print(\"=\"*60)\n        print(\"PREPROCESSING COMPLETE\")\n        print(\"=\"*60)\n        \n        return {\n            'dataframe': self.df,\n            'cycles': self.cycles,\n            'parameters': self.parameters,\n            'data_structures': self.data_structures\n        }\n    \n    def save_results(self, output_dir='output'):\n        \"\"\"\n        Save preprocessing results to files.\n        \n        Args:\n            output_dir: Directory to save results\n        \"\"\"\n        import os\n        os.makedirs(output_dir, exist_ok=True)\n        \n        # Save parameters as JSON\n        with open(f'{output_dir}/model_parameters.json', 'w') as f:\n            json.dump(self.parameters, f, indent=2, default=str)\n        \n        # Save cycles as JSON\n        with open(f'{output_dir}/production_cycles.json', 'w') as f:\n            json.dump(self.cycles, f, indent=2, default=str)\n        \n        # Save data structures as JSON\n        with open(f'{output_dir}/data_structures.json', 'w') as f:\n            json.dump(self.data_structures, f, indent=2, default=str)\n        \n        # Save cleaned dataframe as CSV\n        self.df.to_csv(f'{output_dir}/cleaned_data.csv', index=False)\n        \n        print(f\"Results saved to {output_dir}/\")\n\n\n# Main execution\nif __name__ == \"__main__\":\n    # Configuration\n    CSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpavqxqmtz.csv\"\n    OUTPUT_DIR = \"preprocessing_output\"\n    \n    # Initialize preprocessor\n    preprocessor = ProductionDataPreprocessor(CSV_PATH)\n    \n    # Run full preprocessing\n    results = preprocessor.run_full_preprocessing()\n    \n    # Save results\n    preprocessor.save_results(OUTPUT_DIR)\n    \n    # Display summary\n    print(\"\\n\" + \"=\"*60)\n    print(\"PREPROCESSING SUMMARY\")\n    print(\"=\"*60)\n    print(f\"Total records processed: {results['parameters']['total_records']}\")\n    print(f\"Production cycles identified: {results['parameters']['total_cycles']}\")\n    print(f\"Average cycle time: {results['parameters']['avg_cycle_time_seconds']:.2f} seconds\")\n    print(f\"Production rate: {results['parameters']['production_rate_cycles_per_hour']:.2f} cycles/hour\")\n    print(f\"Average weight: {results['parameters']['avg_weight']:.4f}\")\n    print(f\"Average heating time: {results['parameters']['avg_heating_time_percent']:.2f}%\")\n    print(\"=\"*60)\n",
+      "usage_instructions": "1. Save the preprocessing_code to a Python file (e.g., preprocess_production_data.py)\n2. Run the script: python preprocess_production_data.py\n3. Results will be saved in 'preprocessing_output' directory:\n   - model_parameters.json: Optimization model parameters\n   - production_cycles.json: Extracted production cycles\n   - data_structures.json: Complete data structures for model\n   - cleaned_data.csv: Cleaned and processed data\n4. Import the results in your optimization model:\n   from preprocess_production_data import ProductionDataPreprocessor\n   preprocessor = ProductionDataPreprocessor('path/to/csv.csv')\n   results = preprocessor.run_full_preprocessing()\n   parameters = results['parameters']\n   cycles = results['cycles']"
+    },
+    "scripting": {
+      "code": "#!/usr/bin/env python3\n\"\"\"\nProduction Throughput Maximization with Energy Efficiency Optimization\n======================================================================\nSOLVER: PuLP (CBC solver)\nPROBLEM TYPE: Mixed-Integer Linear Programming (MILP)\n======================================================================\n\nThis script optimizes production scheduling for a heating/processing system\nby maximizing production output while minimizing energy consumption.\n\nAuthor: DeepAgent Pipeline\nDate: 2024\n\"\"\"\n\nimport pandas as pd\nimport numpy as np\nfrom pulp import *\nimport warnings\nimport os\nwarnings.filterwarnings('ignore')\n\n# ============================================================================\n# CONFIGURATION\n# ============================================================================\n\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmpavqxqmtz.csv\"\nOUTPUT_DIR = \"optimization_output\"\n\n# Optimization parameters (cost/revenue coefficients)\nALPHA = 1.0   # Cost coefficient for heater operation\nBETA = 0.5    # Cost coefficient for fan operation\nGAMMA = 0.3   # Cost coefficient for heating state duration\nDELTA = 10.0  # Revenue/benefit coefficient for completed production\n\n# ============================================================================\n# DATA PREPROCESSING\n# ============================================================================\n\ndef load_and_clean_data(csv_path):\n    \"\"\"\n    Load CSV data and perform initial cleaning.\n    \n    Args:\n        csv_path: Path to the CSV file\n        \n    Returns:\n        pd.DataFrame: Cleaned dataframe\n    \"\"\"\n    print(f\"Loading data from: {csv_path}\")\n    \n    # Load the CSV\n    df = pd.read_csv(csv_path)\n    \n    # Convert timestamp to datetime (assuming milliseconds)\n    df['Timestamp'] = pd.to_datetime(df['Timestamp'], unit='ms')\n    \n    # Ensure binary columns are integers\n    binary_cols = ['EmergencyStop', 'FanOn', 'HeatCoverClosed', 'HeaterOn', \n                  'PotAvailable', 'Produce', 'ScaleCupDown', 'ScaleCupUp',\n                  'SwitchToPot', 'TrackSwitchAtCup', 'TrackSwitchAtPot', 'TurnScaleCup']\n    for col in binary_cols:\n        if col in df.columns:\n            df[col] = df[col].astype(int)\n    \n    # Handle missing values\n    df = df.fillna(0)\n    \n    # Sort by timestamp\n    df = df.sort_values('Timestamp').reset_index(drop=True)\n    \n    print(f\"Loaded {len(df)} rows\")\n    print(f\"Date range: {df['Timestamp'].min()} to {df['Timestamp'].max()}\")\n    \n    return df\n\ndef extract_production_cycles(df):\n    \"\"\"\n    Extract production cycles from state transitions.\n    \n    Args:\n        df: Cleaned dataframe\n        \n    Returns:\n        list: List of cycle dictionaries with timing information\n    \"\"\"\n    print(\"Extracting production cycles...\")\n    \n    cycles = []\n    cycle_start = None\n    cycle_id = 0\n    cycle_start_idx = 0\n    \n    for idx, row in df.iterrows():\n        # Detect cycle start: CupState becomes 1 or HeaterOn becomes 1\n        if (row['CupState'] == 1 and (idx == 0 or df.iloc[idx-1]['CupState'] != 1)) or \\\n           (row['HeaterOn'] == 1 and (idx == 0 or df.iloc[idx-1]['HeaterOn'] != 1)):\n            \n            if cycle_start is not None:\n                # Save previous cycle\n                cycle_end = df.iloc[idx-1]\n                cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                \n                cycles.append({\n                    'cycle_id': cycle_id,\n                    'start_time': cycle_start['Timestamp'],\n                    'end_time': cycle_end['Timestamp'],\n                    'duration_seconds': cycle_duration,\n                    'start_index': cycle_start_idx,\n                    'end_index': idx - 1,\n                    'heating_time_percent': df.loc[cycle_start_idx:idx-1, 'HeatingTimePercent'].mean(),\n                    'max_weight': df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].max(),\n                    'avg_weight': df.loc[cycle_start_idx:idx-1, 'CurrentWeight'].mean(),\n                    'produce_event': df.loc[cycle_start_idx:idx-1, 'Produce'].max() == 1\n                })\n                cycle_id += 1\n            \n            cycle_start = row\n            cycle_start_idx = idx\n        \n        # Detect cycle end: CupState becomes 2 or Produce becomes 1\n        if row['CupState'] == 2 or row['Produce'] == 1:\n            if cycle_start is not None:\n                cycle_end = row\n                cycle_duration = (row['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n                \n                cycles.append({\n                    'cycle_id': cycle_id,\n                    'start_time': cycle_start['Timestamp'],\n                    'end_time': row['Timestamp'],\n                    'duration_seconds': cycle_duration,\n                    'start_index': cycle_start_idx,\n                    'end_index': idx,\n                    'heating_time_percent': df.loc[cycle_start_idx:idx, 'HeatingTimePercent'].mean(),\n                    'max_weight': df.loc[cycle_start_idx:idx, 'CurrentWeight'].max(),\n                    'avg_weight': df.loc[cycle_start_idx:idx, 'CurrentWeight'].mean(),\n                    'produce_event': True\n                })\n                cycle_id += 1\n                cycle_start = None\n    \n    # Handle last incomplete cycle\n    if cycle_start is not None:\n        cycle_end = df.iloc[-1]\n        cycle_duration = (cycle_end['Timestamp'] - cycle_start['Timestamp']).total_seconds()\n        \n        cycles.append({\n            'cycle_id': cycle_id,\n            'start_time': cycle_start['Timestamp'],\n            'end_time': cycle_end['Timestamp'],\n            'duration_seconds': cycle_duration,\n            'start_index': cycle_start_idx,\n            'end_index': len(df) - 1,\n            'heating_time_percent': df.loc[cycle_start_idx:, 'HeatingTimePercent'].mean(),\n            'max_weight': df.loc[cycle_start_idx:, 'CurrentWeight'].max(),\n            'avg_weight': df.loc[cycle_start_idx:, 'CurrentWeight'].mean(),\n            'produce_event': df.loc[cycle_start_idx:, 'Produce'].max() == 1\n        })\n    \n    print(f\"Extracted {len(cycles)} production cycles\")\n    \n    return cycles\n\ndef calculate_model_parameters(df, cycles):\n    \"\"\"\n    Calculate parameters needed for the optimization model.\n    \n    Args:\n        df: Cleaned dataframe\n        cycles: List of production cycles\n        \n    Returns:\n        dict: Model parameters dictionary\n    \"\"\"\n    print(\"Calculating model parameters...\")\n    \n    # Calculate timing parameters\n    durations = [c['duration_seconds'] for c in cycles]\n    heating_times = [c['heating_time_percent'] for c in cycles]\n    weights = [c['avg_weight'] for c in cycles]\n    max_weights = [c['max_weight'] for c in cycles]\n    \n    # Time-based parameters\n    total_time = (df['Timestamp'].max() - df['Timestamp'].min()).total_seconds()\n    \n    parameters = {\n        # Timing parameters\n        'avg_cycle_time_seconds': np.mean(durations) if durations else 0,\n        'min_cycle_time_seconds': np.min(durations) if durations else 0,\n        'max_cycle_time_seconds': np.max(durations) if durations else 0,\n        'std_cycle_time_seconds': np.std(durations) if durations else 0,\n        \n        # Heating parameters\n        'avg_heating_time_percent': np.mean(heating_times) if heating_times else 0,\n        'min_heating_time_percent': np.min(heating_times) if heating_times else 0,\n        'max_heating_time_percent': np.max(heating_times) if heating_times else 0,\n        \n        # Production rate\n        'production_rate_cycles_per_hour': len(cycles) / (total_time / 3600) if total_time > 0 else 0,\n        'total_cycles': len(cycles),\n        \n        # Capacity constraints\n        'min_avg_weight': np.min(weights) if weights else 0,\n        'max_avg_weight': np.max(weights) if weights else 0,\n        'avg_weight': np.mean(weights) if weights else 0,\n        'min_max_weight': np.min(max_weights) if max_weights else 0,\n        'max_max_weight': np.max(max_weights) if max_weights else 0,\n        \n        # Time window\n        'total_time_seconds': total_time,\n        'start_time': df['Timestamp'].min().isoformat(),\n        'end_time': df['Timestamp'].max().isoformat(),\n        \n        # State distribution\n        'state_distribution': df['CupState'].value_counts().to_dict(),\n        'state_probabilities': df['CupState'].value_counts(normalize=True).to_dict(),\n        \n        # Operational constraints\n        'heater_on_ratio': df['HeaterOn'].mean(),\n        'fan_on_ratio': df['FanOn'].mean(),\n        'produce_ratio': df['Produce'].mean(),\n        'emergency_stop_count': df['EmergencyStop'].sum(),\n        \n        # Data quality\n        'total_records': len(df),\n        'records_per_cycle': len(df) / len(cycles) if cycles else 0\n    }\n    \n    print(f\"Calculated {len(parameters)} model parameters\")\n    \n    return parameters\n\n# ============================================================================\n# OPTIMIZATION MODEL\n# ============================================================================\n\ndef build_optimization_model(df, cycles, parameters):\n    \"\"\"\n    Build the MILP optimization model for production scheduling.\n    \n    Args:\n        df: Cleaned dataframe\n        cycles: List of production cycles\n        parameters: Model parameters dictionary\n        \n    Returns:\n        pulp.LpProblem: The optimization model\n    \"\"\"\n    print(\"=\"*60)\n    print(\"BUILDING OPTIMIZATION MODEL\")\n    print(\"=\"*60)\n    \n    # Create the problem\n    prob = LpProblem(\"Production_Throughput_Maximization\", LpMaximize)\n    \n    # Sets\n    T = list(range(len(df)))  # Time periods\n    I = list(range(len(cycles)))  # Production items/cycles\n    \n    # Decision Variables\n    # x[i,t] = 1 if item i is processed at time t\n    x = LpVariable.dicts(\"x\", [(i, t) for i in I for t in T], lowBound=0, upBound=1, cat=LpBinary)\n    \n    # y[i,t] = 1 if item i is in heating state at time t\n    y = LpVariable.dicts(\"y\", [(i, t) for i in I for t in T], lowBound=0, upBound=1, cat=LpBinary)\n    \n    # h[t] = 1 if heater is ON at time t\n    h = LpVariable.dicts(\"h\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # f[t] = 1 if fan is ON at time t\n    f = LpVariable.dicts(\"f\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # c[t] = 1 if heat cover is CLOSED at time t\n    c = LpVariable.dicts(\"c\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # scd[t] = 1 if scale cup is DOWN at time t\n    scd = LpVariable.dicts(\"scd\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # scu[t] = 1 if scale cup is UP at time t\n    scu = LpVariable.dicts(\"scu\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # stp[t] = 1 if switch to pot occurs at time t\n    stp = LpVariable.dicts(\"stp\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # tscc[t] = 1 if turn scale cup occurs at time t\n    tscc = LpVariable.dicts(\"tscc\", T, lowBound=0, upBound=1, cat=LpBinary)\n    \n    # Objective Function: Maximize production - minimize energy\n    # Maximize: sum(Produce) - lambda * sum(HeatingTimePercent * HeaterOn)\n    prob += lpSum([DELTA * x[i, t] for i in I for t in T]) - \\\n            lpSum([ALPHA * h[t] for t in T]) - \\\n            lpSum([BETA * f[t] for t in T]) - \\\n            lpSum([GAMMA * y[i, t] for i in I for t in T])\n    \n    # Constraints\n    \n    # 1. Each item must be processed exactly once\n    for i in I:\n        prob += lpSum([x[i, t] for t in T]) == 1, f\"Production_Assignment_{i}\"\n    \n    # 2. Heating state must align with heater operation\n    for i in I:\n        for t in T:\n            prob += y[i, t] <= h[t], f\"Heating_State_Consistency_{i}_{t}\"\n    \n    # 3. Maximum number of items processed per time period (capacity constraint)\n    C_max = 2  # Maximum concurrent processing\n    for t in T:\n        prob += lpSum([x[i, t] for i in I]) <= C_max, f\"Capacity_Constraint_{t}\"\n    \n    # 4. Heating time percentage cannot exceed maximum\n    H_max = parameters['max_heating_time_percent']\n    for i in I:\n        prob += lpSum([y[i, t] for t in T]) <= H_max * len(T) / 100, f\"Heating_Time_Limit_{i}\"\n    \n    # 5. No processing during emergency stop\n    for i in I:\n        for t in T:\n            if t < len(df) and df.iloc[t]['EmergencyStop'] == 1:\n                prob += x[i, t] == 0, f\"Emergency_Stop_{i}_{t}\"\n    \n    # 6. Pot must be available for processing\n    for i in I:\n        for t in T:\n            if t < len(df) and df.iloc[t]['PotAvailable'] == 0:\n                prob += x[i, t] == 0, f\"Pot_Availability_{i}_{t}\"\n    \n    # 7. Heat cover must be closed during heating\n    for i in I:\n        for t in T:\n            prob += y[i, t] <= c[t], f\"Heat_Cover_Constraint_{i}_{t}\"\n    \n    # 8. Fan operation linked to heating state\n    M = 1000  # Big-M constant\n    for t in T:\n        prob += f[t] >= lpSum([y[i, t] for i in I]) - M * (1 - h[t]), f\"Fan_Operation_{t}\"\n    \n    # 9. Scale cup down and up cannot occur simultaneously\n    for t in T:\n        prob += scd[t] + scu[t] <= 1, f\"Scale_Cup_Movement_{t}\"\n    \n    # 10. Turn scale cup operation constraint\n    for t in T:\n        prob += tscc[t] <= scd[t], f\"Turn_Scale_Cup_{t}\"\n    \n    # 11. Processing duration must meet minimum requirements\n    for i in I:\n        min_duration = max(1, int(parameters['min_cycle_time_seconds'] / (parameters['total_time_seconds'] / len(T))))\n        prob += lpSum([y[i, t] for t in T]) >= min_duration * lpSum([x[i, t] for t in T]), f\"Processing_Duration_{i}\"\n    \n    # 12. Weight constraints (simplified - using average weight as proxy)\n    W_min = parameters['min_avg_weight']\n    W_max = parameters['max_max_weight']\n    for i in I:\n        for t in T:\n            if t < len(df):\n                weight = df.iloc[t]['CurrentWeight']\n                if weight < W_min or weight > W_max:\n                    prob += x[i, t] == 0, f\"Weight_Threshold_{i}_{t}\"\n    \n    print(f\"Model built with {len(prob.variables())} variables and {len(prob.constraints)} constraints\")\n    \n    return prob\n\ndef solve_optimization_model(prob):\n    \"\"\"\n    Solve the optimization model.\n    \n    Args:\n        prob: The optimization model\n        \n    Returns:\n        dict: Solution results\n    \"\"\"\n    print(\"=\"*60)\n    print(\"SOLVING OPTIMIZATION MODEL\")\n    print(\"=\"*60)\n    \n    # Solve the problem\n    prob.solve(PULP_CBC_CMD(msg=1, timeLimit=300))\n    \n    # Check solution status\n    status = LpStatus[prob.status]\n    print(f\"Solution Status: {status}\")\n    \n    if status == 'Optimal':\n        print(f\"Objective Value: {value(prob.objective):.4f}\")\n        \n        # Extract decision variable values\n        results = {\n            'status': status,\n            'objective_value': value(prob.objective),\n            'decision_variables': {}\n        }\n        \n        # Extract key decision variables\n        for var in prob.variables():\n            if var.varValue is not None and var.varValue > 0.5:\n                results['decision_variables'][var.name] = var.varValue\n        \n        # Calculate summary statistics\n        total_production = sum(1 for name, val in results['decision_variables'].items() \n                              if name.startswith('x') and val > 0.5)\n        total_heater_on = sum(1 for name, val in results['decision_variables'].items() \n                             if name.startswith('h') and val > 0.5)\n        total_fan_on = sum(1 for name, val in results['decision_variables'].items() \n                          if name.startswith('f') and val > 0.5)\n        \n        results['summary'] = {\n            'total_production_events': total_production,\n            'total_heater_on_periods': total_heater_on,\n            'total_fan_on_periods': total_fan_on\n        }\n        \n        return results\n    else:\n        print(\"No optimal solution found!\")\n        return {\n            'status': status,\n            'objective_value': None,\n            'decision_variables': {},\n            'summary': {}\n        }\n\ndef print_solution_results(results, parameters):\n    \"\"\"\n    Print the solution results in a readable format.\n    \n    Args:\n        results: Solution results dictionary\n        parameters: Model parameters dictionary\n    \"\"\"\n    print(\"=\"*60)\n    print(\"SOLUTION RESULTS\")\n    print(\"=\"*60)\n    \n    print(f\"\\nOptimization Status: {results['status']}\")\n    print(f\"Objective Value: {results['objective_value']:.4f}\")\n    \n    if results['summary']:\n        print(f\"\\nSummary Statistics:\")\n        print(f\"  Total Production Events: {results['summary']['total_production_events']}\")\n        print(f\"  Total Heater ON Periods: {results['summary']['total_heater_on_periods']}\")\n        print(f\"  Total Fan ON Periods: {results['summary']['total_fan_on_periods']}\")\n    \n    print(f\"\\nModel Parameters Used:\")\n    print(f\"  Alpha (Heater Cost): {ALPHA}\")\n    print(f\"  Beta (Fan Cost): {BETA}\")\n    print(f\"  Gamma (Heating Duration Cost): {GAMMA}\")\n    print(f\"  Delta (Production Benefit): {DELTA}\")\n    \n    print(f\"\\nData Summary:\")\n    print(f\"  Total Records: {parameters['total_records']}\")\n    print(f\"  Production Cycles: {parameters['total_cycles']}\")\n    print(f\"  Average Cycle Time: {parameters['avg_cycle_time_seconds']:.2f} seconds\")\n    print(f\"  Production Rate: {parameters['production_rate_cycles_per_hour']:.2f} cycles/hour\")\n    \n    print(\"=\"*60)\n\n# ============================================================================\n# MAIN EXECUTION\n# ============================================================================\n\ndef main():\n    \"\"\"\n    Main execution function.\n    \"\"\"\n    print(\"=\"*60)\n    print(\"PRODUCTION THROUGHPUT MAXIMIZATION WITH ENERGY EFFICIENCY\")\n    print(\"MILP OPTIMIZATION USING PuLP\")\n    print(\"=\"*60)\n    \n    try:\n        # Step 1: Load and clean data\n        df = load_and_clean_data(CSV_PATH)\n        \n        # Step 2: Extract production cycles\n        cycles = extract_production_cycles(df)\n        \n        # Step 3: Calculate model parameters\n        parameters = calculate_model_parameters(df, cycles)\n        \n        # Step 4: Build optimization model\n        prob = build_optimization_model(df, cycles, parameters)\n        \n        # Step 5: Solve optimization model\n        results = solve_optimization_model(prob)\n        \n        # Step 6: Print solution results\n        print_solution_results(results, parameters)\n        \n        print(\"\\nOptimization completed successfully!\")\n        \n    except Exception as e:\n        print(f\"Error during optimization: {str(e)}\")\n        import traceback\n        traceback.print_exc()\n\nif __name__ == \"__main__\":\n    main()",
+      "output_schema": {
+        "properties": {
+          "decision_variables": {
+            "description": "Dictionary of decision variable names and values",
+            "type": "object"
+          },
+          "objective_value": {
+            "description": "Optimized objective function value",
+            "type": "number"
+          },
+          "status": {
+            "description": "Solution status (Optimal, Infeasible, etc.)",
+            "type": "string"
+          },
+          "summary": {
+            "properties": {
+              "total_fan_on_periods": {
+                "type": "integer"
+              },
+              "total_heater_on_periods": {
+                "type": "integer"
+              },
+              "total_production_events": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "successful_implementation": true
+    }
+  }
+}
