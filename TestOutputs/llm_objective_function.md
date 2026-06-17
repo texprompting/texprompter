@@ -1,1 +1,1 @@
-\\sum_{p \\in P} (S_p - C_p) x_p
+\\sum_{p \\in P} P_p x_p

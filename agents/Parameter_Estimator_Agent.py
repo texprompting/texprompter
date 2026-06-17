@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,7 @@ def run_parameter_estimator_agent(
     modelling: ModellingRecommendation | dict[str, Any] | None = None,
     preview_rows: int = 5,
     return_debug: bool = False,
+    max_retries: int = 5,  # Added configurable retry counter
 ) -> dict[str, Any]:
     """Estimate parameters based on dataset statistics and replace them in the mathematical model."""
     resolved_csv_path = _resolve_csv_path(
@@ -140,20 +142,164 @@ def run_parameter_estimator_agent(
         prompt=prompt,
         user_message=user_message,
     )
-
+    print(response)
     structured = response.get("structured_response")
+
+    # --- INITIAL DEFENSIVE ALIAS RECOVERY LAYER ---
     if structured is None:
-        # Fallback: attempt to parse the last AI message text as JSON.
         last_content = _last_ai_content(response.get("messages", []))
         if last_content:
             try:
-                structured = ParameterEstimationRecommendation.model_validate_json(last_content)
+                raw_json = json.loads(last_content)
+                if isinstance(raw_json, dict):
+                    structured = ParameterEstimationRecommendation.model_validate(raw_json)
+            except Exception:
+                try:
+                    structured = ParameterEstimationRecommendation.model_validate_json(last_content)
+                except Exception:
+                    pass
+    elif isinstance(structured, dict):
+        try:
+            structured = ParameterEstimationRecommendation.model_validate(structured)
+        except Exception:
+            pass
+
+    # --- NEW DYNAMIC RETRY LOOP LAYER ---
+    retries_left = max_retries
+    current_stage = "parameter_estimation_retry"
+
+    while retries_left > 0:
+        needs_retry = False
+        reasons = []
+
+        if structured is not None and isinstance(structured, ParameterEstimationRecommendation):
+            if not structured.updated_constraint_functions:
+                needs_retry = True
+                reasons.append("The field 'updated_constraint_functions' is empty or missing.")
+            if not structured.updated_objective_function:
+                needs_retry = True
+                reasons.append("The field 'updated_objective_function' is empty or missing.")
+            if not structured.parameter_values and modelling_info.get("parameters"):
+                needs_retry = True
+                reasons.append("The field 'parameter_values' is empty, but the model contains abstract parameters to estimate.")
+        else:
+            needs_retry = True
+            reasons.append("Initial response did not parse or produce a structured recommendation.")
+
+        # SUCCESS CONDITION: If no fields are empty, break out of the retry loop completely
+        if not needs_retry:
+            break
+
+        import warnings
+        warnings.warn(
+            f"Empty fields detected. Triggering self-correction retry ({max_retries - retries_left + 1}/{max_retries}). Reasons: {reasons}", 
+            RuntimeWarning, 
+            stacklevel=2
+        )
+        
+        # Build an explicit self-correction critique prompt to force the agent to fill the fields
+        retry_user_message = f"""{user_message}
+        
+        CRITICAL ERROR IN PREVIOUS ATTEMPT:
+        Your previous generation was rejected because one or more required fields came back blank or empty.
+        Specific failures identified: {', '.join(reasons)}
+        
+        Please correct this behavior. You MUST completely fill out the following fields:
+        1. 'updated_objective_function': Substitute the abstract parameter symbols with your estimated aggregate numeric constants from the dataset statistics.
+        2. 'updated_constraint_functions': Substitute the abstract parameter symbols with your estimated aggregate numeric values across all constraints.
+        3. 'parameter_values': Map each abstract parameter symbol to its chosen numeric value.
+        
+        Ensure no field is left blank or empty. Re-generate the full structured format now.
+        """
+        
+        # Re-invoke the agent with the self-correction critique prompt
+        response = invoke_agent_with_prompt_trace(
+            agent,
+            stage=f"{current_stage}_{max_retries - retries_left + 1}",
+            prompt=prompt,
+            user_message=retry_user_message,
+        )
+        print(f"Retry Response ({max_retries - retries_left + 1}):", response)
+        structured = response.get("structured_response")
+        
+        # Defensive coercion on the retry result
+        if structured is None:
+            last_content = _last_ai_content(response.get("messages", []))
+            if last_content:
+                try:
+                    raw_json = json.loads(last_content)
+                    if isinstance(raw_json, dict):
+                        structured = ParameterEstimationRecommendation.model_validate(raw_json)
+                except Exception:
+                    try:
+                        structured = ParameterEstimationRecommendation.model_validate_json(last_content)
+                    except Exception:
+                        pass
+        elif isinstance(structured, dict):
+            try:
+                structured = ParameterEstimationRecommendation.model_validate(structured)
             except Exception:
                 pass
+                
+        retries_left -= 1
+    # --- END RETRY LOOP LAYER ---
+
     if structured is None:
-        raise ValueError("parameter estimation agent did not produce a structured_response.")
+        raise ValueError("parameter estimation agent did not produce a structured_response after execution retry loops.")
 
     recommendation = _coerce_recommendation(structured)
+
+    # --- CSV-STATS FALLBACK: populate empty parameter_values from df.describe() means ---
+    if not recommendation.parameter_values and modelling_info:
+        params = modelling_info.get("parameters", [])
+        if params:
+            col_means: dict[str, float] = (
+                df.describe(include="number").loc["mean"].to_dict()
+            )
+            col_mean_lower = {k.lower().replace(" ", "_"): v for k, v in col_means.items()}
+
+            fallback_values: dict[str, float] = {}
+            fallback_rationales: dict[str, str] = {}
+            for param in params:
+                symbol = param.get("symbol", "") if isinstance(param, dict) else getattr(param, "symbol", "")
+                description = param.get("description", "") if isinstance(param, dict) else getattr(param, "description", "")
+                if not symbol:
+                    continue
+                bare = re.sub(r"[_{].*", "", symbol).lower()
+                matched_val: float | None = None
+                for col_key, mean_val in col_means.items():
+                    if bare in col_key.lower() or col_key.lower() in description.lower():
+                        matched_val = round(float(mean_val), 4)
+                        break
+                if matched_val is None:
+                    matched_val = round(float(next(iter(col_means.values()), 0.0)), 4)
+                fallback_values[symbol] = matched_val
+                fallback_rationales[symbol] = (
+                    f"Indexed parameter (per-entity). Representative mean from CSV statistics: {matched_val}. "
+                    "Actual values are sourced per-row from the CSV at solve time."
+                )
+
+            if fallback_values:
+                recommendation = ParameterEstimationRecommendation(
+                    parameter_values=fallback_values,
+                    parameter_rationales=fallback_rationales,
+                    updated_constraint_functions=recommendation.updated_constraint_functions
+                    or modelling_info.get("constraint_functions", []),
+                    updated_objective_function=recommendation.updated_objective_function
+                    or modelling_info.get("objective_function", ""),
+                )
+                
+    if modelling_info:
+        if not recommendation.updated_constraint_functions:
+            recommendation = recommendation.model_copy(
+                update={"updated_constraint_functions": modelling_info.get("constraint_functions", [])}
+            )
+        if not recommendation.updated_objective_function:
+            recommendation = recommendation.model_copy(
+                update={"updated_objective_function": modelling_info.get("objective_function", "")}
+            )
+            
+    # --- END CSV-STATS FALLBACK ---
     _persist_outputs(recommendation)
 
     if return_debug:

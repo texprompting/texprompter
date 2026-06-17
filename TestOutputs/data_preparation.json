@@ -1,75 +1,131 @@
 {
   "imports": "import pandas as pd",
-  "data_loading": "df = pd.read_csv('/tmp/tmp4s30cp_l.csv')",
+  "data_loading": "df = pd.read_csv('tmpqvk7s26u.csv')",
   "preprocessing_steps": [
     "Load the product dataset from the CSV file.",
-    "Group the dataset by 'Product_SKU' and aggregate numeric columns using the mean to ensure uniqueness and handle any potential duplicate entries.",
-    "Extract the unique list of product SKUs to define the set P.",
-    "Map the aggregated columns to dictionaries representing the parameters S, C, M, A, and D."
+    "Strip any leading/trailing whitespaces from the column names.",
+    "Extract the set of products P from the 'Product_ID' column.",
+    "Map product-specific parameters (Profit, Machine A hours, Machine B hours, Labor hours, Raw Material units, Min Production, and Max Demand) to dictionaries indexed by Product_ID.",
+    "Calculate the capacities C_A, C_B, C_L, and C_R as 60% of the total resource requirements if all products were produced at their maximum market demand. This ensures that the resource constraints are realistic and binding."
   ],
   "sets": [
     {
       "name": "P",
-      "description": "Set of unique product SKUs",
-      "source_column": "Product_SKU",
-      "python_representation": "P = df_clean['Product_SKU'].tolist()"
+      "description": "Set of products",
+      "source_column": "Product_ID",
+      "python_representation": "P = df['Product_ID'].tolist()"
     }
   ],
   "parameters": [
     {
-      "symbol": "S_p",
-      "description": "Sale price per unit of product p",
+      "symbol": "Profit_p",
+      "description": "Profit per unit of product p",
       "source_columns": [
-        "Sale_Price_Per_Unit"
+        "Profit_Per_Unit"
       ],
-      "python_representation": "S = df_clean.set_index('Product_SKU')['Sale_Price_Per_Unit'].to_dict()"
+      "python_representation": "Profit = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()"
     },
     {
-      "symbol": "C_p",
-      "description": "Material cost per unit of product p",
+      "symbol": "M^A_p",
+      "description": "Machine A hours required per unit of product p",
       "source_columns": [
-        "Material_Cost_Per_Unit"
+        "Machine_A_Hours_Req"
       ],
-      "python_representation": "C = df_clean.set_index('Product_SKU')['Material_Cost_Per_Unit'].to_dict()"
+      "python_representation": "M_A = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()"
     },
     {
-      "symbol": "M_p",
-      "description": "Molding minutes required per unit of product p",
+      "symbol": "M^B_p",
+      "description": "Machine B hours required per unit of product p",
       "source_columns": [
-        "Molding_Mins_Req"
+        "Machine_B_Hours_Req"
       ],
-      "python_representation": "M = df_clean.set_index('Product_SKU')['Molding_Mins_Req'].to_dict()"
+      "python_representation": "M_B = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()"
     },
     {
-      "symbol": "A_p",
-      "description": "Assembly minutes required per unit of product p",
+      "symbol": "L_p",
+      "description": "Labor hours required per unit of product p",
       "source_columns": [
-        "Assembly_Mins_Req"
+        "Labor_Hours_Req"
       ],
-      "python_representation": "A = df_clean.set_index('Product_SKU')['Assembly_Mins_Req'].to_dict()"
+      "python_representation": "L = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()"
     },
     {
-      "symbol": "D_p",
-      "description": "Maximum market capacity of product p",
+      "symbol": "R_p",
+      "description": "Raw material units required per unit of product p",
       "source_columns": [
-        "Max_Market_Capacity"
+        "Raw_Material_Units_Req"
       ],
-      "python_representation": "D = df_clean.set_index('Product_SKU')['Max_Market_Capacity'].to_dict()"
+      "python_representation": "R = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()"
+    },
+    {
+      "symbol": "MinProd_p",
+      "description": "Minimum production requirement for product p",
+      "source_columns": [
+        "Min_Production_Requirement"
+      ],
+      "python_representation": "MinProd = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()"
+    },
+    {
+      "symbol": "MaxDem_p",
+      "description": "Maximum market demand for product p",
+      "source_columns": [
+        "Max_Market_Demand"
+      ],
+      "python_representation": "MaxDem = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()"
+    },
+    {
+      "symbol": "C_A",
+      "description": "Capacity of Machine A",
+      "source_columns": [
+        "Machine_A_Hours_Req",
+        "Max_Market_Demand"
+      ],
+      "python_representation": "C_A = 0.6 * sum(df['Machine_A_Hours_Req'] * df['Max_Market_Demand'])"
+    },
+    {
+      "symbol": "C_B",
+      "description": "Capacity of Machine B",
+      "source_columns": [
+        "Machine_B_Hours_Req",
+        "Max_Market_Demand"
+      ],
+      "python_representation": "C_B = 0.6 * sum(df['Machine_B_Hours_Req'] * df['Max_Market_Demand'])"
+    },
+    {
+      "symbol": "C_L",
+      "description": "Capacity of Labor",
+      "source_columns": [
+        "Labor_Hours_Req",
+        "Max_Market_Demand"
+      ],
+      "python_representation": "C_L = 0.6 * sum(df['Labor_Hours_Req'] * df['Max_Market_Demand'])"
+    },
+    {
+      "symbol": "C_R",
+      "description": "Capacity of Raw Materials",
+      "source_columns": [
+        "Raw_Material_Units_Req",
+        "Max_Market_Demand"
+      ],
+      "python_representation": "C_R = 0.6 * sum(df['Raw_Material_Units_Req'] * df['Max_Market_Demand'])"
     }
   ],
   "data_structures_ready": true,
   "mapping_explanation": [
-    "Product_SKU maps to the set of products P.",
-    "Sale_Price_Per_Unit maps to the parameter S_p, representing the selling price of product p.",
-    "Material_Cost_Per_Unit maps to the parameter C_p, representing the material cost of product p.",
-    "Molding_Mins_Req maps to the parameter M_p, representing the molding time required for product p.",
-    "Assembly_Mins_Req maps to the parameter A_p, representing the assembly time required for product p.",
-    "Max_Market_Capacity maps to the parameter D_p, representing the maximum market demand capacity for product p."
+    "Product_ID maps to the set of products P.",
+    "Profit_Per_Unit maps to the objective coefficient Profit_p.",
+    "Machine_A_Hours_Req maps to the Machine A coefficient M^A_p.",
+    "Machine_B_Hours_Req maps to the Machine B coefficient M^B_p.",
+    "Labor_Hours_Req maps to the Labor coefficient L_p.",
+    "Raw_Material_Units_Req maps to the Raw material coefficient R_p.",
+    "Min_Production_Requirement maps to the lower bound MinProd_p.",
+    "Max_Market_Demand maps to the upper bound MaxDem_p.",
+    "Capacities C_A, C_B, C_L, and C_R are calculated as 60% of the total maximum demand requirements for each resource, as they are not directly provided in the CSV."
   ],
   "assumptions": [
-    "We assume that Product_SKU is the unique identifier for each product. If duplicates exist, we aggregate them by taking the mean.",
-    "We assume that the total molding capacity is 450,000.0 minutes and the total assembly capacity is 450,000.0 minutes as specified in the mathematical model.",
-    "We assume that all prices, costs, and times are non-negative."
+    "We assume that the capacities C_A, C_B, C_L, and C_R are not provided in the CSV and can be modeled as 60% of the total maximum demand requirements to ensure realistic and binding constraints.",
+    "We assume that all product IDs are unique and can be used as dictionary keys.",
+    "We assume that the data is clean and does not contain missing values."
   ],
-  "full_script": "import pandas as pd\n\ndef prepare_data():\n    # Load the CSV file\n    file_path = '/tmp/tmp4s30cp_l.csv'\n    df = pd.read_csv(file_path)\n    \n    # Aggregate by Product_SKU to ensure uniqueness and handle any potential duplicates\n    df_clean = df.groupby('Product_SKU', as_index=False).agg({\n        'Sale_Price_Per_Unit': 'mean',\n        'Material_Cost_Per_Unit': 'mean',\n        'Molding_Mins_Req': 'mean',\n        'Assembly_Mins_Req': 'mean',\n        'Max_Market_Capacity': 'mean'\n    })\n    \n    # Define the set of products\n    P = df_clean['Product_SKU'].tolist()\n    \n    # Define parameters as dictionaries mapping Product_SKU to values\n    S = df_clean.set_index('Product_SKU')['Sale_Price_Per_Unit'].to_dict()\n    C = df_clean.set_index('Product_SKU')['Material_Cost_Per_Unit'].to_dict()\n    M = df_clean.set_index('Product_SKU')['Molding_Mins_Req'].to_dict()\n    A = df_clean.set_index('Product_SKU')['Assembly_Mins_Req'].to_dict()\n    D = df_clean.set_index('Product_SKU')['Max_Market_Capacity'].to_dict()\n    \n    return {\n        'P': P,\n        'S': S,\n        'C': C,\n        'M': M,\n        'A': A,\n        'D': D\n    }\n\nif __name__ == '__main__':\n    data = prepare_data()\n    print(f\"Prepared data with {len(data['P'])} products.\")\n"
+  "full_script": "import pandas as pd\n\n# Load the data\ndf = pd.read_csv('tmpqvk7s26u.csv')\n\n# Clean column names\ndf.columns = df.columns.str.strip()\n\n# Define the set of products\nP = df['Product_ID'].tolist()\n\n# Define product-specific parameters as dictionaries\nProfit = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()\nM_A = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()\nM_B = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()\nL = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()\nR = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()\nMinProd = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()\nMaxDem = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()\n\n# Define capacities for resources\n# Since capacities are not provided in the CSV, we assume they are 60% of the total maximum demand requirements\nC_A = 0.6 * sum(df['Machine_A_Hours_Req'] * df['Max_Market_Demand'])\nC_B = 0.6 * sum(df['Machine_B_Hours_Req'] * df['Max_Market_Demand'])\nC_L = 0.6 * sum(df['Labor_Hours_Req'] * df['Max_Market_Demand'])\nC_R = 0.6 * sum(df['Raw_Material_Units_Req'] * df['Max_Market_Demand'])\n\n# Package all data structures for optimization\ndata = {\n    'P': P,\n    'Profit': Profit,\n    'M_A': M_A,\n    'M_B': M_B,\n    'L': L,\n    'R': R,\n    'MinProd': MinProd,\n    'MaxDem': MaxDem,\n    'C_A': C_A,\n    'C_B': C_B,\n    'C_L': C_L,\n    'C_R': C_R\n}"
 }

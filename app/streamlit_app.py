@@ -116,14 +116,28 @@ def display_modeling_output(modeling_dict: dict):
     problem_type = "Minimization" if is_minimizing else "Maximization"
     st.header(f"MILP Model Documentation ({problem_type})")
     
+    # ------------------------------------------------------------------------
+    # 1. Objective Function Display (Using st.latex for Block Math)
+    # ------------------------------------------------------------------------
     st.subheader("Objective Function")
     obj_fn = modeling_dict.get("objective_function", "")
     if obj_fn:
-        st.latex(obj_fn)
+        # Strip off markdown math block wraps ($$) if the file accidentally saved them
+        clean_obj = str(obj_fn).strip().strip("$")
+        # Ensure backslashes survive internal string escaping
+        try:
+            clean_obj = clean_obj.encode('utf-8').decode('unicode_escape')
+        except Exception:
+            pass
+        st.latex(clean_obj)
     else:
         st.write("No objective function defined.")
 
     col1, col2 = st.columns(2)
+    
+    # ------------------------------------------------------------------------
+    # 2. Decision Variables (Using Inline Markdown Math $...$)
+    # ------------------------------------------------------------------------
     with col1:
         with st.expander("Decision Variables", expanded=True):
             variables = modeling_dict.get("variables", [])
@@ -135,10 +149,19 @@ def display_modeling_output(modeling_dict: dict):
                     else:
                         name = getattr(var, "variable", None) or getattr(var, "name", "")
                         desc = getattr(var, "meaning", None) or getattr(var, "description", "")
-                    st.markdown(f" :math:`{name}` : {desc}")
+                    
+                    clean_name = str(name).strip().strip("$")
+                    try:
+                        clean_name = clean_name.encode('utf-8').decode('unicode_escape')
+                    except Exception:
+                        pass
+                    st.markdown(f"${clean_name}$ : {desc}")
             else:
                 st.write("No variables defined.")
 
+    # ------------------------------------------------------------------------
+    # 3. Parameters & Coefficients (Using Inline Markdown Math $...$)
+    # ------------------------------------------------------------------------
     with col2:
         with st.expander("Parameters & Coefficients", expanded=True):
             parameters = modeling_dict.get("parameters", [])
@@ -148,17 +171,37 @@ def display_modeling_output(modeling_dict: dict):
                         symbol = param.get("symbol") or param.get("name") or ""
                         desc = param.get("description") or param.get("meaning") or ""
                     else:
-                        symbol = getattr(param, "symbol", None) or getattr(param, "name", "")
-                        desc = getattr(param, "description", None) or getattr(param, "meaning", "")
-                    st.markdown(f" :math:`{symbol}` : {desc}")
+                        symbol = getattr(param, "symbol", None) or getattr(var, "name", "")
+                        desc = getattr(param, "meaning", None) or getattr(var, "description", "")
+                    
+                    clean_symbol = str(symbol).strip().strip("$")
+                    try:
+                        clean_symbol = clean_symbol.encode('utf-8').decode('unicode_escape')
+                    except Exception:
+                        pass
+                    st.markdown(f"${clean_symbol}$ : {desc}")
             else:
                 st.write("No parameters defined.")
 
+    # ------------------------------------------------------------------------
+    # 4. Constraints Display Loop (Using st.latex for Block Math Layouts)
+    # ------------------------------------------------------------------------
     st.subheader("Constraints")
     constraints = modeling_dict.get("constraint_functions", [])
     if constraints:
         for constraint in constraints:
-            st.latex(constraint)
+            if isinstance(constraint, str):
+                # Clean mathematical markdown syntax wrappers out
+                clean_constraint = constraint.strip().strip("$")
+                
+                # Force Python to correctly preserve single raw backslashes (e.g., \sum, \cdot) 
+                # instead of misinterpreting them as standard Python string escape behaviors
+                try:
+                    clean_constraint = clean_constraint.encode('utf-8').decode('unicode_escape')
+                except Exception:
+                    pass
+                
+                st.latex(clean_constraint)
     else:
         st.write("No constraints defined.")
 
@@ -274,7 +317,6 @@ else:
             # Automatic continuous execution path when intercept loop option is unchecked
             if not st.session_state.use_intercept:
                 with st.spinner("⏳ Automatically running downstream code blocks..."):
-                    # Cast inputs directly to Pydantic objects to satisfy individual agent parameters
                     raw_uc = st.session_state.pipeline_state.get("use_case", {})
                     raw_md = st.session_state.pipeline_state.get("modelling", {})
                     raw_sc = st.session_state.pipeline_state.get("input_schema_payload", {})
@@ -362,9 +404,6 @@ else:
             
             with st.expander("Review Active Mathematical Model & Parameters", expanded=True):
                 display_modeling_output(st.session_state.pipeline_state.get("modelling", {}))
-                if st.session_state.pipeline_state.get("parameter_estimation"):
-                    st.markdown("**Current Parameter Values:**")
-                    st.json(st.session_state.pipeline_state["parameter_estimation"].get("parameter_values", {}))
             
             st.divider()
             col1, col2, col3 = st.columns(3)
@@ -373,16 +412,13 @@ else:
                 if st.button("✅ Approve Everything & Continue", use_container_width=True):
                     try:
                         with st.spinner("⏳ Compiling data preprocessing mappers and runtime scripts..."):
-                            # Resolve instances straight to primitive models safely
                             c_use_case = clean_for_serialization(st.session_state.pipeline_state.get("use_case", {}))
                             c_modeling = clean_for_serialization(st.session_state.pipeline_state.get("modelling", {}))
                             c_schema = clean_for_serialization(st.session_state.pipeline_state.get("input_schema_payload", {}))
                             
-                            # Cast dictionary frames to real strict objects for processing nodes
                             obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(c_use_case) if c_use_case else None
                             obj_md = importlib.import_module("schemas.basemodels").ModellingRecommendation.model_validate(c_modeling) if c_modeling else None
                             
-                            # Execute targeted nodes strictly sequentially without overlapping loops
                             preprocessing_output = run_preprocessing_agent(
                                 csv_file_path=st.session_state.csv_path,
                                 use_case=obj_uc,
@@ -395,7 +431,7 @@ else:
                             obj_prep = importlib.import_module("schemas.basemodels").PreprocessingRecommendation.model_validate(clean_for_serialization(preprocessing_output))
                             
                             scripting_output = run_scripting_agent(
-                                csv_file_path=st.session_state.csv_path,
+                                csv_file_path=st.session_path if hasattr(st.session_state, 'csv_path') else st.session_state.csv_path,
                                 modelling=obj_md,
                                 preprocessing=obj_prep,
                                 input_schema_payload=c_schema,
@@ -436,7 +472,6 @@ else:
                                     c_use_case = clean_for_serialization(st.session_state.pipeline_state.get("use_case", {}))
                                     c_schema = clean_for_serialization(st.session_state.pipeline_state.get("input_schema_payload", {}))
                                     
-                                    # Create modified use-case container with adjustments appended
                                     obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(c_use_case) if c_use_case else None
                                     if obj_uc:
                                         assumptions_list = list(obj_uc.assumptions or [])
@@ -444,15 +479,12 @@ else:
                                         obj_uc = obj_uc.model_copy(update={"assumptions": assumptions_list})
                                         st.session_state.pipeline_state["use_case"] = clean_for_serialization(obj_uc)
                                     
-                                    # Step A: Rerun Modeling Node cleanly
                                     m_res = run_modeling_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, preview_rows=5)
                                     obj_md = ModellingRecommendation.model_validate(m_res.get("result") if isinstance(m_res, dict) and "result" in m_res else m_res)
                                     
-                                    # Step B: Rerun Parameter Estimation Node cleanly
                                     pe_res = run_parameter_estimation_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, modelling=obj_md, preview_rows=5)
                                     obj_pe = ParameterEstimationRecommendation.model_validate(pe_res.get("result") if isinstance(pe_res, dict) and "result" in pe_res else pe_res)
                                     
-                                    # Synchronize structural parameter changes inside model constraints in-place
                                     obj_md = obj_md.model_copy(update={
                                         "constraint_functions": obj_pe.updated_constraint_functions,
                                         "objective_function": obj_pe.updated_objective_function
@@ -460,7 +492,6 @@ else:
                                     st.session_state.pipeline_state["modelling"] = clean_for_serialization(obj_md)
                                     st.session_state.pipeline_state["parameter_estimation"] = clean_for_serialization(obj_pe)
                                     
-                                    # Step C: Complete subsequent processing steps sequentially
                                     p_res = run_preprocessing_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, modelling=obj_md, input_schema_payload=c_schema, preview_rows=5)
                                     st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(p_res)
                                     
@@ -515,7 +546,6 @@ if st.session_state.pipeline_state.get("scripting"):
     scripting = st.session_state.pipeline_state["scripting"]
     with st.expander("💻 Generated Solver Code & Optimization Results", expanded=True):
         
-        # Create two distinct tabs to separate code engineering from business metrics
         tab_metrics, tab_code = st.tabs(["📊 Optimization Results", "📄 Generated Python Code"])
         
         with tab_code:
@@ -526,14 +556,10 @@ if st.session_state.pipeline_state.get("scripting"):
         with tab_metrics:
             st.header("🎯 Sandbox Optimization Outputs")
             
-            # --- SAFE EXTRATION FIX ---
-            # Read the real numbers from the top level first to bypass the literal placeholder bug
             status_val = scripting.get("solution_status")
             obj_val = scripting.get("objective_value")
             dec_vars = scripting.get("decision_variables")
             
-            # Fallback recovery logic: if top level is missing, check the sub-schema
-            # but reject literal descriptor strings ("str", "float")
             if not status_val or status_val == "str":
                 schema = scripting.get("output_schema", {})
                 if isinstance(schema, dict):
@@ -544,16 +570,13 @@ if st.session_state.pipeline_state.get("scripting"):
                     if schema.get("decision_variables") != "dict[str, float]":
                         dec_vars = schema.get("decision_variables")
             
-            # Apply friendly defaults if data is still settling
             if not status_val or status_val == "str":
                 status_val = "Executed Cleanly"
             if obj_val == "float":
                 obj_val = None
             if not isinstance(dec_vars, dict) or dec_vars == "dict[str, float]":
                 dec_vars = {}
-            # ---------------------------
             
-            # 1. Structural Metric Highlights Cards
             col1, col2 = st.columns(2)
             with col1:
                 if "optimal" in str(status_val).lower():
@@ -574,14 +597,11 @@ if st.session_state.pipeline_state.get("scripting"):
                     
             st.divider()
             
-            # 2. Decision Allocation Tables and Native Streamlit Graphs
             if dec_vars:
                 st.subheader("💡 Optimal Decision Allocations")
                 
-                # Flatten the dictionary mapping out into an analytical pandas dataframe
                 df_vars = pd.DataFrame(list(dec_vars.items()), columns=["Variable / Resource Allocation", "Calculated Optimal Value"])
                 
-                # Filter option out to let users hide idle variables
                 hide_zeros = st.checkbox("Hide variables with a 0 value allocation", value=False)
                 if hide_zeros:
                     df_vars = df_vars[df_vars["Calculated Optimal Value"] > 0]

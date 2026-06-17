@@ -119,12 +119,16 @@ def run_mathematical_modelling_agent(
         use_case_info = dict(use_case)
 
     prompt = load_system_prompt_result("modeling")
+    
+    # Core fix area: ensuring the underlying model uses with_structured_output
+    # if your custom create_agent wrapper allows it.
     agent = create_agent(
         model=build_chat_model(),
         tools=[],
         system_prompt=prompt.template,
         response_format=ModellingRecommendation,
     )
+    
     user_message = f"""Create a MILP formulation for optimizing production quantity per product.
                         CSV Data Information:
                         {json.dumps(columns_info, indent=2)}
@@ -140,18 +144,49 @@ def run_mathematical_modelling_agent(
         user_message=user_message,
     )
 
+    print(response)
+
     structured = response.get("structured_response")
+    
+    # --- START DEFENSIVE ALIAS RECOVERY LAYER ---
+    # If structured response is missing or raw parsing fails, extract raw dict and map keys safely
     if structured is None:
-        # Fallback: attempt to parse the last AI message text as JSON.
         last_content = _last_ai_content(response.get("messages", []))
         if last_content:
             try:
-                structured = ModellingRecommendation.model_validate_json(last_content)
+                # Attempt to parse whatever JSON text string came out
+                raw_json = json.loads(last_content)
+                if isinstance(raw_json, dict):
+                    # Actively reconstruct the payload matching ModellingRecommendation's strict keys
+                    mapped_payload = {
+                        "objective_function": raw_json.get("objective_function") or raw_json.get("objective") or raw_json.get("objective_expr") or "",
+                        "constraint_functions": raw_json.get("constraint_functions") or raw_json.get("constraints") or raw_json.get("constraint_list") or [],
+                        "variables": raw_json.get("variables") or raw_json.get("decision_variables") or [],
+                        "parameters": raw_json.get("parameters") or raw_json.get("parameter_list") or [],
+                        "minimizing_problem": raw_json.get("minimizing_problem", True)
+                    }
+                    structured = ModellingRecommendation.model_validate(mapped_payload)
             except Exception:
                 pass
+                
+    elif isinstance(structured, dict):
+        # Even if 'structured_response' returned a dict, check if Gemini chose intuitive alias keys
+        mapped_payload = {
+            "objective_function": structured.get("objective_function") or structured.get("objective") or structured.get("objective_expr") or "",
+            "constraint_functions": structured.get("constraint_functions") or structured.get("constraints") or structured.get("constraint_list") or [],
+            "variables": structured.get("variables") or structured.get("decision_variables") or [],
+            "parameters": structured.get("parameters") or structured.get("parameter_list") or [],
+            "minimizing_problem": structured.get("minimizing_problem", True)
+        }
+        structured = ModellingRecommendation.model_validate(mapped_payload)
+        
+    elif isinstance(structured, ModellingRecommendation):
+        # If it successfully returned a strict object, we are perfectly fine
+        pass
+    # --- END DEFENSIVE ALIAS RECOVERY LAYER ---
+
     if structured is None:
         raise ValueError("modeling agent did not produce a structured_response.")
-
 
     recommendation = _coerce_recommendation(structured)
     _persist_outputs(recommendation)
