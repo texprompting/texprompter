@@ -12,6 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 
@@ -56,6 +57,27 @@ def _normalize_openai_compat_stream_chunk(chunk: dict[str, Any]) -> dict[str, An
     return out
 
 
+def _extract_text_from_list_or_str(val: Any) -> str:
+    if isinstance(val, str):
+        return val
+    if isinstance(val, list):
+        parts = []
+        for p in val:
+            if isinstance(p, dict):
+                text_val = p.get("text") or p.get("content") or ""
+                if isinstance(text_val, str):
+                    parts.append(text_val)
+            elif isinstance(p, str):
+                parts.append(p)
+        return "".join(parts)
+    if val is not None:
+        try:
+            return str(val)
+        except Exception:
+            pass
+    return ""
+
+
 class _OllamaCompatStreamChatOpenAI(ChatOpenAI):
     """Apply OpenAI-compat stream normalization before LangChain converts chunks."""
 
@@ -78,26 +100,22 @@ class OllamaLiveStreamHandler(BaseCallbackHandler):
     still looks \"live\" (OpenAI-compatible servers behave this way).
     """
 
-    def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+    def on_llm_new_token(self, token: Any, **kwargs: Any) -> None:
         chunk = kwargs.get("chunk")
         msg = getattr(chunk, "message", None) if chunk is not None else None
 
         effective = ""
         if token:
-            effective = token
+            effective = _extract_text_from_list_or_str(token)
         elif chunk is not None:
             ct_text = getattr(chunk, "text", None)
-            if isinstance(ct_text, str) and ct_text:
-                effective = ct_text
-            elif ct_text is not None:
-                try:
-                    effective = str(ct_text)
-                except Exception:
-                    effective = ""
+            if ct_text is not None:
+                effective = _extract_text_from_list_or_str(ct_text)
         if not effective and msg is not None:
             try:
                 tx = msg.text
-                effective = str(tx) if tx is not None else ""
+                if tx is not None:
+                    effective = _extract_text_from_list_or_str(tx)
             except Exception:
                 effective = ""
         if not effective and msg is not None:
@@ -105,9 +123,10 @@ class OllamaLiveStreamHandler(BaseCallbackHandler):
             if isinstance(ak, dict):
                 for key in ("reasoning_content", "thinking", "reasoning"):
                     v = ak.get(key)
-                    if isinstance(v, str) and v:
-                        effective = v
-                        break
+                    if v is not None:
+                        effective = _extract_text_from_list_or_str(v)
+                        if effective:
+                            break
 
         if effective:
             sys.stdout.write(effective)
@@ -510,21 +529,88 @@ def mlflow_guidelines_judge_model_uri() -> str | None:
     return None
 
 
-def build_chat_model(temperature: float = 0.0) -> ChatOpenAI:
-    """Build a ChatOpenAI client pointed at the local Ollama OpenAI-compatible endpoint.
+def _extract_response_schema(response_format: Any) -> tuple[str | None, Any]:
+    if response_format is None:
+        return None, None
 
-    Ollama exposes an OpenAI-compatible API at ``$OLLAMA_BASE_URL/v1``. By using
-    ``langchain_openai.ChatOpenAI`` (which wraps the ``openai`` SDK), every LLM
-    call is automatically captured by ``mlflow.langchain.autolog()`` (the
+    from pydantic import BaseModel
+    if isinstance(response_format, type) and issubclass(response_format, BaseModel):
+        return "application/json", response_format
+
+    if isinstance(response_format, dict):
+        js = response_format.get("json_schema")
+        if isinstance(js, dict):
+            schema = js.get("schema")
+            if schema:
+                return "application/json", schema
+        if "type" in response_format or "properties" in response_format:
+            return "application/json", response_format
+
+    return None, None
+
+
+class _VertexCompatChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
+    """ChatGoogleGenerativeAI wrapper that normalizes AIMessage content from list to string
+
+    and converts OpenAI-style response_format to Google GenAI response_schema.
+    """
+
+    def __getattribute__(self, name: str) -> Any:
+        if name == "profile":
+            return None
+        return super().__getattribute__(name)
+
+    def bind(self, **kwargs: Any) -> Any:
+        rf = kwargs.pop("response_format", None)
+        if rf is not None:
+            mime_type, schema = _extract_response_schema(rf)
+            if mime_type and schema:
+                kwargs["response_mime_type"] = mime_type
+                kwargs["response_schema"] = schema
+        kwargs.pop("strict", None)
+        return super().bind(**kwargs)
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> Any:
+        rf = kwargs.pop("response_format", None)
+        if rf is not None:
+            mime_type, schema = _extract_response_schema(rf)
+            if mime_type and schema:
+                kwargs["response_mime_type"] = mime_type
+                kwargs["response_schema"] = schema
+        kwargs.pop("strict", None)
+        return super().bind_tools(tools, **kwargs)
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        res = super().invoke(*args, **kwargs)
+        self._normalize_message(res)
+        return res
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        res = await super().ainvoke(*args, **kwargs)
+        self._normalize_message(res)
+        return res
+
+    def stream(self, *args: Any, **kwargs: Any) -> Any:
+        for chunk in super().stream(*args, **kwargs):
+            self._normalize_message(chunk)
+            yield chunk
+
+    async def astream(self, *args: Any, **kwargs: Any) -> Any:
+        async for chunk in super().astream(*args, **kwargs):
+            self._normalize_message(chunk)
+            yield chunk
+
+    def _normalize_message(self, message: Any) -> None:
+        if hasattr(message, "content"):
+            message.content = _extract_text_from_list_or_str(message.content)
+
+
+
+def build_chat_model(temperature: float = 0.0) -> ChatGoogleGenerativeAI:
+    """Build a ChatGoogleGenerativeAI client pointed at the Google Vertex cloud.
+
+    Every LLM call is automatically captured by ``mlflow.langchain.autolog()`` (the
     pipeline's single source of trace truth).
-
-    ``timeout`` and ``max_retries`` defend against an Ollama protocol corner
-    case we hit in practice: when langgraph fans out parallel tool calls and
-    the model later returns a long structured-output response, the openai HTTP
-    client occasionally never observes the end of the stream and hangs on an
-    idle keep-alive socket forever. Bounding both keeps the pipeline lively
-    and surfaces the failure as a normal exception in the agent error path
-    instead of an indefinite stall.
 
     Live token streaming to the terminal is enabled when ``OLLAMA_STREAM_STDOUT``
     is ``1``/``true``/``yes`` (or when the orchestrator sets it for
@@ -532,30 +618,21 @@ def build_chat_model(temperature: float = 0.0) -> ChatOpenAI:
     ``create_agent`` calls ``bound_model.invoke(messages)`` without propagating
     the agent graph's invoke callbacks.
     """
-    base_url = ollama_openai_compatible_base_url()
-
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OLLAMA_API_KEY") or "ollama"
-
-    request_timeout_s = float(os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "600"))
-    max_retries = int(os.getenv("OLLAMA_REQUEST_MAX_RETRIES", "1"))
-    max_tokens_raw = os.getenv("OLLAMA_MAX_TOKENS", "").strip()
-    max_tokens = int(max_tokens_raw) if max_tokens_raw else None
-    extra_body_raw = os.getenv("OLLAMA_EXTRA_BODY_JSON", "").strip()
-    extra_body = json.loads(extra_body_raw) if extra_body_raw else None
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    project = os.getenv("GCP_PROJECT", "gen-lang-client-0779155519")
+    location = os.getenv("GCP_LOCATION", "global")
+    max_retries = int(os.getenv("GEMINI_REQUEST_MAX_RETRIES", "5"))
 
     stream_stdout = ollama_stream_to_stdout_enabled()
 
     stream_callbacks = [OllamaLiveStreamHandler()] if stream_stdout else None
 
-    return _OllamaCompatStreamChatOpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        model=os.getenv("OLLAMA_MODEL", "qwen3.6:latest"),
+    return _VertexCompatChatGoogleGenerativeAI(
+        model=model_name,
+        project=project,
+        location=location,
         temperature=temperature,
-        timeout=request_timeout_s,
         max_retries=max_retries,
-        max_tokens=max_tokens,
-        extra_body=extra_body,
         streaming=stream_stdout,
         callbacks=stream_callbacks,
     )

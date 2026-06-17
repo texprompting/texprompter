@@ -1,95 +1,75 @@
 {
   "imports": "import pandas as pd",
-  "data_loading": "df = pd.read_csv('tmpwhpprvlw.csv')",
+  "data_loading": "df = pd.read_csv('/tmp/tmp4s30cp_l.csv')",
   "preprocessing_steps": [
-    "Load the CSV file into a pandas DataFrame.",
-    "Extract the set of products P from the 'Product_ID' column.",
-    "Create dictionaries for parameters pi_p, a_p, b_p, l_p, r_p, min_p, max_p keyed by Product_ID.",
-    "Ensure all numeric parameters are converted to float or int as appropriate.",
-    "Define capacity constants for Machine A, Machine B, Labor, and Raw Material."
+    "Load the product dataset from the CSV file.",
+    "Group the dataset by 'Product_SKU' and aggregate numeric columns using the mean to ensure uniqueness and handle any potential duplicate entries.",
+    "Extract the unique list of product SKUs to define the set P.",
+    "Map the aggregated columns to dictionaries representing the parameters S, C, M, A, and D."
   ],
   "sets": [
     {
       "name": "P",
-      "description": "Set of all products to be produced",
-      "source_column": "Product_ID",
-      "python_representation": "P = df['Product_ID'].tolist()"
+      "description": "Set of unique product SKUs",
+      "source_column": "Product_SKU",
+      "python_representation": "P = df_clean['Product_SKU'].tolist()"
     }
   ],
   "parameters": [
     {
-      "symbol": "pi_p",
-      "description": "Profit per unit for each product",
+      "symbol": "S_p",
+      "description": "Sale price per unit of product p",
       "source_columns": [
-        "Profit_Per_Unit"
+        "Sale_Price_Per_Unit"
       ],
-      "python_representation": "pi_p = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))"
+      "python_representation": "S = df_clean.set_index('Product_SKU')['Sale_Price_Per_Unit'].to_dict()"
     },
     {
-      "symbol": "a_p",
-      "description": "Machine A hours required per unit for each product",
+      "symbol": "C_p",
+      "description": "Material cost per unit of product p",
       "source_columns": [
-        "Machine_A_Hours_Req"
+        "Material_Cost_Per_Unit"
       ],
-      "python_representation": "a_p = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))"
+      "python_representation": "C = df_clean.set_index('Product_SKU')['Material_Cost_Per_Unit'].to_dict()"
     },
     {
-      "symbol": "b_p",
-      "description": "Machine B hours required per unit for each product",
+      "symbol": "M_p",
+      "description": "Molding minutes required per unit of product p",
       "source_columns": [
-        "Machine_B_Hours_Req"
+        "Molding_Mins_Req"
       ],
-      "python_representation": "b_p = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))"
+      "python_representation": "M = df_clean.set_index('Product_SKU')['Molding_Mins_Req'].to_dict()"
     },
     {
-      "symbol": "l_p",
-      "description": "Labor hours required per unit for each product",
+      "symbol": "A_p",
+      "description": "Assembly minutes required per unit of product p",
       "source_columns": [
-        "Labor_Hours_Req"
+        "Assembly_Mins_Req"
       ],
-      "python_representation": "l_p = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))"
+      "python_representation": "A = df_clean.set_index('Product_SKU')['Assembly_Mins_Req'].to_dict()"
     },
     {
-      "symbol": "r_p",
-      "description": "Raw material units required per unit for each product",
+      "symbol": "D_p",
+      "description": "Maximum market capacity of product p",
       "source_columns": [
-        "Raw_Material_Units_Req"
+        "Max_Market_Capacity"
       ],
-      "python_representation": "r_p = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))"
-    },
-    {
-      "symbol": "min_p",
-      "description": "Minimum production requirement for each product",
-      "source_columns": [
-        "Min_Production_Requirement"
-      ],
-      "python_representation": "min_p = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))"
-    },
-    {
-      "symbol": "max_p",
-      "description": "Maximum market demand for each product",
-      "source_columns": [
-        "Max_Market_Demand"
-      ],
-      "python_representation": "max_p = dict(zip(df['Product_ID'], df['Max_Market_Demand']))"
+      "python_representation": "D = df_clean.set_index('Product_SKU')['Max_Market_Capacity'].to_dict()"
     }
   ],
   "data_structures_ready": true,
   "mapping_explanation": [
-    "Product_ID column maps to the index set P.",
-    "Profit_Per_Unit maps to parameter pi_p (objective coefficient).",
-    "Machine_A_Hours_Req maps to parameter a_p (constraint coefficient for Machine A).",
-    "Machine_B_Hours_Req maps to parameter b_p (constraint coefficient for Machine B).",
-    "Labor_Hours_Req maps to parameter l_p (constraint coefficient for Labor).",
-    "Raw_Material_Units_Req maps to parameter r_p (constraint coefficient for Raw Material).",
-    "Min_Production_Requirement maps to parameter min_p (lower bound for x_p).",
-    "Max_Market_Demand maps to parameter max_p (upper bound for x_p)."
+    "Product_SKU maps to the set of products P.",
+    "Sale_Price_Per_Unit maps to the parameter S_p, representing the selling price of product p.",
+    "Material_Cost_Per_Unit maps to the parameter C_p, representing the material cost of product p.",
+    "Molding_Mins_Req maps to the parameter M_p, representing the molding time required for product p.",
+    "Assembly_Mins_Req maps to the parameter A_p, representing the assembly time required for product p.",
+    "Max_Market_Capacity maps to the parameter D_p, representing the maximum market demand capacity for product p."
   ],
   "assumptions": [
-    "All required data is present and correctly formatted in the CSV.",
-    "Product IDs are unique and serve as valid dictionary keys.",
-    "Capacity constants (16600, 19500, 32400, 98000) are fixed and not derived from the CSV.",
-    "Decision variables x_p are non-negative integers."
+    "We assume that Product_SKU is the unique identifier for each product. If duplicates exist, we aggregate them by taking the mean.",
+    "We assume that the total molding capacity is 450,000.0 minutes and the total assembly capacity is 450,000.0 minutes as specified in the mathematical model.",
+    "We assume that all prices, costs, and times are non-negative."
   ],
-  "full_script": "import pandas as pd\n\ndf = pd.read_csv('tmpwhpprvlw.csv')\n\n# Define index set\nP = df['Product_ID'].tolist()\n\n# Define parameters as dictionaries keyed by Product_ID\npi_p = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))\na_p = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))\nb_p = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))\nl_p = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))\nr_p = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))\nmin_p = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))\nmax_p = dict(zip(df['Product_ID'], df['Max_Market_Demand']))\n\n# Define capacity constants\nCAPACITY_A = 16600.0\nCAPACITY_B = 19500.0\nCAPACITY_L = 32400.0\nCAPACITY_R = 98000.0\n\n# Data structures are now ready for optimization modeling."
+  "full_script": "import pandas as pd\n\ndef prepare_data():\n    # Load the CSV file\n    file_path = '/tmp/tmp4s30cp_l.csv'\n    df = pd.read_csv(file_path)\n    \n    # Aggregate by Product_SKU to ensure uniqueness and handle any potential duplicates\n    df_clean = df.groupby('Product_SKU', as_index=False).agg({\n        'Sale_Price_Per_Unit': 'mean',\n        'Material_Cost_Per_Unit': 'mean',\n        'Molding_Mins_Req': 'mean',\n        'Assembly_Mins_Req': 'mean',\n        'Max_Market_Capacity': 'mean'\n    })\n    \n    # Define the set of products\n    P = df_clean['Product_SKU'].tolist()\n    \n    # Define parameters as dictionaries mapping Product_SKU to values\n    S = df_clean.set_index('Product_SKU')['Sale_Price_Per_Unit'].to_dict()\n    C = df_clean.set_index('Product_SKU')['Material_Cost_Per_Unit'].to_dict()\n    M = df_clean.set_index('Product_SKU')['Molding_Mins_Req'].to_dict()\n    A = df_clean.set_index('Product_SKU')['Assembly_Mins_Req'].to_dict()\n    D = df_clean.set_index('Product_SKU')['Max_Market_Capacity'].to_dict()\n    \n    return {\n        'P': P,\n        'S': S,\n        'C': C,\n        'M': M,\n        'A': A,\n        'D': D\n    }\n\nif __name__ == '__main__':\n    data = prepare_data()\n    print(f\"Prepared data with {len(data['P'])} products.\")\n"
 }
