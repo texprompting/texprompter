@@ -1,62 +1,55 @@
 import pandas as pd
 import pulp
 
-# Load data
-df = pd.read_csv('/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpmy48smww.csv')
+# 1. Load Data
+csv_path = "/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpwhpprvlw.csv"
+df = pd.read_csv(csv_path)
 
-# Define set I
-I = df['Product_ID'].tolist()
+# 2. Define Parameters
+P = df['Product_ID'].tolist()
+pi_p = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))
+a_p = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))
+b_p = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))
+l_p = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))
+r_p = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))
+min_p = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))
+max_p = dict(zip(df['Product_ID'], df['Max_Market_Demand']))
 
-# Define parameters
-p_i = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))
-a_i = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))
-b_i = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))
-l_i = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))
-r_i = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))
-L_i = dict(zip(df['Product_ID'], df['Min_Production_Requirement'].astype(float)))
-U_i = dict(zip(df['Product_ID'], df['Max_Market_Demand'].astype(float)))
+# 3. Define Capacity Constants
+CAPACITY_A = 16600.0
+CAPACITY_B = 19500.0
+CAPACITY_L = 32400.0
+CAPACITY_R = 98000.0
 
-# Resource capacities (RHS constants)
-CAPACITY_A = 100.0
-CAPACITY_B = 120.0
-CAPACITY_L = 200.0
-CAPACITY_R = 600.0
-
-# Create the problem
+# 4. Create Problem
 prob = pulp.LpProblem("Production_Planning", pulp.LpMaximize)
 
-# Decision variables
-x = pulp.LpVariable.dicts("x", I, lowBound=0, upBound=None, cat='Continuous')
+# 5. Create Decision Variables (Integer)
+x = pulp.LpVariable.dicts("x", P, lowBound=0, cat=pulp.LpInteger)
 
-# Apply lower and upper bounds to variables
-for i in I:
-    x[i].lowBound = L_i[i]
-    x[i].upBound = U_i[i]
+# 6. Add Objective Function
+prob += pulp.lpSum([pi_p[p] * x[p] for p in P]), "Total_Profit"
 
-# Objective function
-prob += pulp.lpSum([p_i[i] * x[i] for i in I]), "Total_Profit"
+# 7. Add Constraints
+prob += pulp.lpSum([a_p[p] * x[p] for p in P]) <= CAPACITY_A, "Machine_A_Capacity"
+prob += pulp.lpSum([b_p[p] * x[p] for p in P]) <= CAPACITY_B, "Machine_B_Capacity"
+prob += pulp.lpSum([l_p[p] * x[p] for p in P]) <= CAPACITY_L, "Labor_Capacity"
+prob += pulp.lpSum([r_p[p] * x[p] for p in P]) <= CAPACITY_R, "Raw_Material_Capacity"
 
-# Constraints
-prob += pulp.lpSum([a_i[i] * x[i] for i in I]) <= CAPACITY_A, "Machine_A_Capacity"
-prob += pulp.lpSum([b_i[i] * x[i] for i in I]) <= CAPACITY_B, "Machine_B_Capacity"
-prob += pulp.lpSum([l_i[i] * x[i] for i in I]) <= CAPACITY_L, "Labor_Capacity"
-prob += pulp.lpSum([r_i[i] * x[i] for i in I]) <= CAPACITY_R, "Raw_Material_Capacity"
+# 8. Apply Variable Bounds
+for p in P:
+    x[p].lowBound = min_p[p]
+    x[p].upBound = max_p[p]
 
-# Solve
-prob.solve(pulp.PULP_CBC_CMD(msg=0))
+# 9. Solve
+prob.solve()
 
-# Extract results
-decision_variables = {i: pulp.value(x[i]) for i in I}
-objective_value = pulp.value(prob.objective)
-solution_status = pulp.LpStatus[prob.status]
-solver_message = f"Solver status: {solution_status}"
-
-# Output schema
-output = {
-    "decision_variables": decision_variables,
-    "objective_value": objective_value,
-    "solution_status": solution_status,
-    "solver_message": solver_message
+# 10. Extract Results
+result = {
+    "decision_variables": {p: x[p].varValue for p in P},
+    "objective_value": pulp.value(prob.objective),
+    "solution_status": pulp.LpStatus[prob.status],
+    "solver_message": str(pulp.LpStatus[prob.status])
 }
 
-print(output)
+print(result)

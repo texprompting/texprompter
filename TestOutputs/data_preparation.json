@@ -1,94 +1,95 @@
 {
   "imports": "import pandas as pd",
-  "data_loading": "df = pd.read_csv('/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpsramx9ki.csv')",
+  "data_loading": "df = pd.read_csv('tmpwhpprvlw.csv')",
   "preprocessing_steps": [
     "Load the CSV file into a pandas DataFrame.",
-    "Extract the list of unique product IDs to form the index set P.",
-    "Convert numeric columns to appropriate float or int types.",
-    "Create dictionaries mapping each product ID to its corresponding parameter values."
+    "Extract the set of products P from the 'Product_ID' column.",
+    "Create dictionaries for parameters pi_p, a_p, b_p, l_p, r_p, min_p, max_p keyed by Product_ID.",
+    "Ensure all numeric parameters are converted to float or int as appropriate.",
+    "Define capacity constants for Machine A, Machine B, Labor, and Raw Material."
   ],
   "sets": [
     {
       "name": "P",
-      "description": "Set of products to be produced",
+      "description": "Set of all products to be produced",
       "source_column": "Product_ID",
       "python_representation": "P = df['Product_ID'].tolist()"
     }
   ],
   "parameters": [
     {
-      "symbol": "P_i",
+      "symbol": "pi_p",
       "description": "Profit per unit for each product",
       "source_columns": [
         "Profit_Per_Unit"
       ],
-      "python_representation": "P_i = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))"
+      "python_representation": "pi_p = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))"
     },
     {
-      "symbol": "M_Ai",
+      "symbol": "a_p",
       "description": "Machine A hours required per unit for each product",
       "source_columns": [
         "Machine_A_Hours_Req"
       ],
-      "python_representation": "M_Ai = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))"
+      "python_representation": "a_p = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))"
     },
     {
-      "symbol": "M_Bi",
+      "symbol": "b_p",
       "description": "Machine B hours required per unit for each product",
       "source_columns": [
         "Machine_B_Hours_Req"
       ],
-      "python_representation": "M_Bi = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))"
+      "python_representation": "b_p = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))"
     },
     {
-      "symbol": "L_i",
+      "symbol": "l_p",
       "description": "Labor hours required per unit for each product",
       "source_columns": [
         "Labor_Hours_Req"
       ],
-      "python_representation": "L_i = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))"
+      "python_representation": "l_p = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))"
     },
     {
-      "symbol": "R_i",
+      "symbol": "r_p",
       "description": "Raw material units required per unit for each product",
       "source_columns": [
         "Raw_Material_Units_Req"
       ],
-      "python_representation": "R_i = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))"
+      "python_representation": "r_p = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))"
     },
     {
-      "symbol": "x_min_i",
+      "symbol": "min_p",
       "description": "Minimum production requirement for each product",
       "source_columns": [
         "Min_Production_Requirement"
       ],
-      "python_representation": "x_min_i = dict(zip(df['Product_ID'], df['Min_Production_Requirement'].astype(int)))"
+      "python_representation": "min_p = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))"
     },
     {
-      "symbol": "D_i",
+      "symbol": "max_p",
       "description": "Maximum market demand for each product",
       "source_columns": [
         "Max_Market_Demand"
       ],
-      "python_representation": "D_i = dict(zip(df['Product_ID'], df['Max_Market_Demand'].astype(int)))"
+      "python_representation": "max_p = dict(zip(df['Product_ID'], df['Max_Market_Demand']))"
     }
   ],
   "data_structures_ready": true,
   "mapping_explanation": [
     "Product_ID column maps to the index set P.",
-    "Profit_Per_Unit column maps to parameter P_i (objective coefficient).",
-    "Machine_A_Hours_Req column maps to parameter M_Ai.",
-    "Machine_B_Hours_Req column maps to parameter M_Bi.",
-    "Labor_Hours_Req column maps to parameter L_i.",
-    "Raw_Material_Units_Req column maps to parameter R_i.",
-    "Min_Production_Requirement column maps to parameter x_min_i (lower bound).",
-    "Max_Market_Demand column maps to parameter D_i (upper bound)."
+    "Profit_Per_Unit maps to parameter pi_p (objective coefficient).",
+    "Machine_A_Hours_Req maps to parameter a_p (constraint coefficient for Machine A).",
+    "Machine_B_Hours_Req maps to parameter b_p (constraint coefficient for Machine B).",
+    "Labor_Hours_Req maps to parameter l_p (constraint coefficient for Labor).",
+    "Raw_Material_Units_Req maps to parameter r_p (constraint coefficient for Raw Material).",
+    "Min_Production_Requirement maps to parameter min_p (lower bound for x_p).",
+    "Max_Market_Demand maps to parameter max_p (upper bound for x_p)."
   ],
   "assumptions": [
-    "All required columns are present and contain valid numeric data.",
-    "Product_IDs are unique and serve as valid dictionary keys.",
-    "Missing values are not expected in the dataset.",
-    "The mathematical model contract uses illustrative fixed coefficients; actual optimization will dynamically use values loaded from the CSV."
+    "All required data is present and correctly formatted in the CSV.",
+    "Product IDs are unique and serve as valid dictionary keys.",
+    "Capacity constants (16600, 19500, 32400, 98000) are fixed and not derived from the CSV.",
+    "Decision variables x_p are non-negative integers."
   ],
-  "full_script": "import pandas as pd\n\n# Load data\ndf = pd.read_csv('/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpsramx9ki.csv')\n\n# Define index set\nP = df['Product_ID'].tolist()\n\n# Define parameters as dictionaries indexed by product ID\nP_i = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))\nM_Ai = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))\nM_Bi = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))\nL_i = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))\nR_i = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))\nx_min_i = dict(zip(df['Product_ID'], df['Min_Production_Requirement'].astype(int)))\nD_i = dict(zip(df['Product_ID'], df['Max_Market_Demand'].astype(int)))\n\n# Data structures are now ready for optimization modeling"
+  "full_script": "import pandas as pd\n\ndf = pd.read_csv('tmpwhpprvlw.csv')\n\n# Define index set\nP = df['Product_ID'].tolist()\n\n# Define parameters as dictionaries keyed by Product_ID\npi_p = dict(zip(df['Product_ID'], df['Profit_Per_Unit']))\na_p = dict(zip(df['Product_ID'], df['Machine_A_Hours_Req']))\nb_p = dict(zip(df['Product_ID'], df['Machine_B_Hours_Req']))\nl_p = dict(zip(df['Product_ID'], df['Labor_Hours_Req']))\nr_p = dict(zip(df['Product_ID'], df['Raw_Material_Units_Req']))\nmin_p = dict(zip(df['Product_ID'], df['Min_Production_Requirement']))\nmax_p = dict(zip(df['Product_ID'], df['Max_Market_Demand']))\n\n# Define capacity constants\nCAPACITY_A = 16600.0\nCAPACITY_B = 19500.0\nCAPACITY_L = 32400.0\nCAPACITY_R = 98000.0\n\n# Data structures are now ready for optimization modeling."
 }

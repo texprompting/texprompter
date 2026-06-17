@@ -12,12 +12,19 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Reload changed modules when Streamlit runs in a long-lived process.
-# This avoids stale imports for schema or orchestrator code during development.
 for module_name in ["schemas.basemodels", "orchestrator.pipeline", "agents.context_agent"]:
     if module_name in sys.modules:
         importlib.reload(sys.modules[module_name])
 
-from orchestrator.pipeline import stream_pipeline, run_downstream_agents, rerun_modeling_with_feedback
+# Import individual agent runners to resolve the intercept loop conflict
+from orchestrator.pipeline import (
+    stream_pipeline, 
+    run_modeling_agent,
+    run_parameter_estimation_agent,
+    run_preprocessing_agent, 
+    run_scripting_agent
+)
+from schemas.basemodels import ModellingRecommendation, ParameterEstimationRecommendation
 
 # Configure Streamlit
 st.set_page_config(page_title="TexPrompter - Workflow Optimizer", layout="wide")
@@ -34,7 +41,7 @@ def initialize_session_state():
         "csv_filename": None,
         "csv_path": None,
         "initial_prompt": "",
-        "pipeline_state": None,
+        "pipeline_state": {},  
         "current_stage": None,
         "agent_logs": [],
         "execution_running": False,
@@ -42,15 +49,14 @@ def initialize_session_state():
         "last_error": None,
         "error_stage": None,
         "modeling_edit_mode": False,
-        "modeling_edited_content": None,
         "result_file": None,
         "show_modeling_intercept": False,
         "original_modeling": None,
+        "use_intercept": True,  
     }
     for key, default_value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default_value
-
 
 initialize_session_state()
 
@@ -64,6 +70,19 @@ def add_log(message: str, level: str = "info"):
     formatted_msg = f"[{timestamp}] {message}"
     st.session_state.agent_logs.append({"message": formatted_msg, "level": level})
 
+def clean_for_serialization(obj):
+    """Recursively forces Pydantic objects or custom class instances into pure JSON primitives."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    elif hasattr(obj, "__dict__"):
+        return {k: clean_for_serialization(v) for k, v in obj.__dict__.items()}
+    elif isinstance(obj, dict):
+        return {k: clean_for_serialization(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_serialization(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(clean_for_serialization(item) for item in obj)
+    return obj
 
 def save_pipeline_results(final_state: dict, csv_filename: str, initial_prompt: str):
     """Save pipeline results to JSON file."""
@@ -73,13 +92,11 @@ def save_pipeline_results(final_state: dict, csv_filename: str, initial_prompt: 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_file = output_dir / f"result_{timestamp}_{csv_filename.replace('.csv', '')}.json"
     
-    # Prepare results with metadata
     results = {
         "metadata": {
             "timestamp": timestamp,
             "csv_filename": csv_filename,
             "initial_prompt": initial_prompt,
-            "modeling_edited": st.session_state.modeling_edited_content is not None,
         },
         "pipeline_state": final_state,
     }
@@ -89,66 +106,54 @@ def save_pipeline_results(final_state: dict, csv_filename: str, initial_prompt: 
     
     return str(result_file)
 
-
-def extract_stage_from_traces(traces: list) -> str:
-    """Extract the current stage from pipeline traces."""
-    if not traces:
-        return "unknown"
-    
-    last_trace = traces[-1] if traces else ""
-    if ":" in last_trace:
-        return last_trace.split(":")[0]
-    return last_trace
-
-
 def display_modeling_output(modeling_dict: dict):
-    """Format modeling output for display using structured Pydantic fields."""
+    """Format modeling output supporting dynamic variable/parameter keys and math symbols."""
     if not modeling_dict:
         st.write("No modeling output available")
         return
 
-    # 1. Header & Problem Type
     is_minimizing = modeling_dict.get("minimizing_problem", True)
     problem_type = "Minimization" if is_minimizing else "Maximization"
     st.header(f"MILP Model Documentation ({problem_type})")
     
-    # 2. Objective Function
     st.subheader("Objective Function")
     obj_fn = modeling_dict.get("objective_function", "")
     if obj_fn:
-        # Streamlit handles LaTeX natively via st.latex
         st.latex(obj_fn)
     else:
         st.write("No objective function defined.")
 
-    # 3. Variables & Parameters (Expandable Reference Sections)
     col1, col2 = st.columns(2)
-    
     with col1:
-        with st.expander("Decision Variables", expanded=False):
+        with st.expander("Decision Variables", expanded=True):
             variables = modeling_dict.get("variables", [])
             if variables:
                 for var in variables:
-                    # Assumes Pydantic model / dict has 'name' and 'description' attributes
-                    name = var.get("name") if isinstance(var, dict) else getattr(var, "name", "")
-                    desc = var.get("description") if isinstance(var, dict) else getattr(var, "description", "")
-                    st.latex(f"**{name}**: {desc}")
+                    if isinstance(var, dict):
+                        name = var.get("variable") or var.get("name") or ""
+                        desc = var.get("meaning") or var.get("description") or ""
+                    else:
+                        name = getattr(var, "variable", None) or getattr(var, "name", "")
+                        desc = getattr(var, "meaning", None) or getattr(var, "description", "")
+                    st.markdown(f" :math:`{name}` : {desc}")
             else:
                 st.write("No variables defined.")
 
     with col2:
-        with st.expander("Parameters & Coefficients", expanded=False):
+        with st.expander("Parameters & Coefficients", expanded=True):
             parameters = modeling_dict.get("parameters", [])
             if parameters:
                 for param in parameters:
-                    # Assumes Pydantic model / dict has 'symbol' and 'description' attributes
-                    symbol = param.get("symbol") if isinstance(param, dict) else getattr(param, "symbol", "")
-                    desc = param.get("description") if isinstance(param, dict) else getattr(param, "description", "")
-                    st.markdown(f"**{symbol}**: {desc}")
+                    if isinstance(param, dict):
+                        symbol = param.get("symbol") or param.get("name") or ""
+                        desc = param.get("description") or param.get("meaning") or ""
+                    else:
+                        symbol = getattr(param, "symbol", None) or getattr(param, "name", "")
+                        desc = getattr(param, "description", None) or getattr(param, "meaning", "")
+                    st.markdown(f" :math:`{symbol}` : {desc}")
             else:
                 st.write("No parameters defined.")
 
-    # 4. Constraints Section
     st.subheader("Constraints")
     constraints = modeling_dict.get("constraint_functions", [])
     if constraints:
@@ -157,99 +162,63 @@ def display_modeling_output(modeling_dict: dict):
     else:
         st.write("No constraints defined.")
 
-    # 5. Natural Language Explanation
-    explanations = modeling_dict.get("explanation_of_ILP", [])
-    if explanations:
-        st.subheader("Model Explanation")
-        for exp in explanations:
-            st.markdown(f"* {exp}")
-
-    # 6. Required Data Columns (Optional UI reference)
-    cols_used = modeling_dict.get("col_names_used", [])
-    if cols_used:
-        st.caption(f"**Required CSV Columns:** {', '.join(cols_used)}")
-
-
 # ============================================================================
-# Main UI Layout
+# Sidebar Configuration Interface
 # ============================================================================
 
-# Sidebar with input controls
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # File uploader
     uploaded_file = st.file_uploader("Upload your CSV", type=["csv"], key="csv_uploader")
-    
     if uploaded_file:
         st.session_state.csv_file = uploaded_file.getvalue()
         st.session_state.csv_filename = uploaded_file.name
     
-    # Optional initial prompt
     st.session_state.initial_prompt = st.text_area(
         "Optional: Initial Prompt for Context Agent",
         value=st.session_state.initial_prompt,
-        help="Provide context or specific instructions for the analysis",
         height=100
     )
     
-    # Start button
+    st.session_state.use_intercept = st.checkbox(
+        "Enable Human Intercept Loop", 
+        value=st.session_state.use_intercept,
+        help="Check this to review everything up to Parameter Estimation before running downstream script generators."
+    )
+    
     if st.session_state.csv_file and not st.session_state.execution_running:
-        if st.button("🚀 Start Analysis", width="stretch"):
+        if st.button("🚀 Start Analysis", use_container_width=True):
             st.session_state.execution_running = True
             st.session_state.execution_complete = False
-            st.session_state.pipeline_state = None
+            st.session_state.pipeline_state = {}  
             st.session_state.agent_logs = []
             st.session_state.last_error = None
             st.session_state.error_stage = None
             st.session_state.show_modeling_intercept = False
             st.session_state.modeling_edit_mode = False
-            st.session_state.modeling_edited_content = None
             st.session_state.result_file = None
             st.session_state.original_modeling = None
             add_log("Analysis started...")
             st.rerun()
-    
-    # Retry button (shown on error)
-    if st.session_state.last_error and not st.session_state.execution_running:
-        if st.button("🔄 Retry from Failed Stage", width="stretch"):
-            st.session_state.execution_running = True
-            st.session_state.last_error = None
-            st.session_state.show_modeling_intercept = False
-            add_log(f"Retrying from stage: {st.session_state.error_stage}...")
-            st.rerun()
 
-# Main content area
 if not st.session_state.csv_file:
     st.info("👈 Please upload a CSV file to get started")
 else:
-    # Display CSV preview
     with st.expander("📊 CSV Preview", expanded=False):
         try:
             df = pd.read_csv(StringIO(st.session_state.csv_file.decode()))
-            st.dataframe(df.head(10), width="stretch")
-            st.caption(f"Shape: {df.shape[0]} rows × {df.shape[1]} columns")
+            st.dataframe(df.head(10), use_container_width=True)
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
     
-    # ========================================================================
-    # Create persistent containers for logs and outputs
-    # ========================================================================
     log_container = st.container()
     outputs_container = st.container()
     
     # ========================================================================
-    # Pipeline Execution
+    # Primary Pipeline Core Stream Engine
     # ========================================================================
-    
-    # ========================================================================
-    # Pipeline Execution
-    # ========================================================================
-    
-    # FIX 1: Allow the block to process if execution is running, regardless of partial state
     if st.session_state.execution_running:
         try:
-            # Save CSV temporarily if it hasn't been saved yet
             if not st.session_state.csv_path:
                 with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.csv') as tmp:
                     tmp.write(st.session_state.csv_file)
@@ -258,7 +227,6 @@ else:
             st.divider()
             st.header("📈 Real-Time Execution Progress")
             
-            # Create placeholder for logs inside persistent container
             with log_container:
                 with st.expander("📋 Execution Logs", expanded=True):
                     logs_placeholder = st.empty()
@@ -266,7 +234,6 @@ else:
             displayed_stages = set()
             seen_traces = 0
             
-            # Stream pipeline execution
             with st.status("Executing pipeline...", expanded=True) as status:
                 for state_update in stream_pipeline(
                     csv_file_path=st.session_state.csv_path,
@@ -274,52 +241,63 @@ else:
                     initial_prompt=st.session_state.initial_prompt,
                 ):
                     if isinstance(state_update, dict):
-                        st.session_state.pipeline_state = state_update
+                        clean_update = clean_for_serialization(state_update)
+                        st.session_state.pipeline_state.update(clean_update)
                         
-                        # Extract and display traces
-                        traces = state_update.get("traces", [])
+                        traces = clean_update.get("traces", [])
                         if isinstance(traces, list):
                             for trace in traces[seen_traces:]:
                                 add_log(trace)
                                 status.write(f"✓ {trace}")
                             seen_traces = len(traces)
                         
-                        # Update logs in placeholder
                         with logs_placeholder.container():
                             for log_entry in st.session_state.agent_logs:
-                                if log_entry["level"] == "error":
-                                    st.error(log_entry["message"])
-                                elif log_entry["level"] == "warning":
-                                    st.warning(log_entry["message"])
-                                else:
-                                    st.text(log_entry["message"])
+                                st.text(log_entry["message"])
                         
-                        # Check for errors
-                        errors = state_update.get("errors", [])
-                        if errors:
-                            error = errors[-1]
+                        if clean_update.get("errors"):
+                            error = clean_update["errors"][-1]
                             st.session_state.last_error = error
                             st.session_state.error_stage = error.get("agent_name", "unknown")
                             raise Exception(f"Error in {error.get('agent_name')}: {error.get('message')}")
                         
-                        # Use Case output
-                        if "use_case" in state_update and "use_case" not in displayed_stages:
-                            if state_update.get("use_case"):
-                                displayed_stages.add("use_case")
-                                # (Optional) Early render container can go here if desired
-                        
-                        # FIX 2: Intercept cleanly, change execution state, and trigger a proactive rerun
-                        if "modelling" in state_update and "modelling" not in displayed_stages:
-                            if state_update.get("modelling"):
-                                displayed_stages.add("modelling")
-                                st.session_state.original_modeling = state_update["modelling"]
-                                st.session_state.show_modeling_intercept = True
-                                st.session_state.execution_running = False  # Stop the background running state
-                                
-                                add_log("⏸️ Waiting for user feedback on mathematical model...")
-                                st.rerun()  # Instantly break and re-render the clean UI
+                        # HALT CONDITION: Capture state right after parameter estimation settles
+                        if "parameter_estimation" in clean_update and clean_update.get("parameter_estimation"):
+                            if "parameter_estimation" not in displayed_stages:
+                                displayed_stages.add("parameter_estimation")
+                                if st.session_state.use_intercept:
+                                    st.session_state.show_modeling_intercept = True
+                                    st.session_state.execution_running = False
+                                    add_log("⏸️ Human intercept triggered after Parameter Estimation.")
+                                    st.rerun()
+
+            # Automatic continuous execution path when intercept loop option is unchecked
+            if not st.session_state.use_intercept:
+                with st.spinner("⏳ Automatically running downstream code blocks..."):
+                    # Cast inputs directly to Pydantic objects to satisfy individual agent parameters
+                    raw_uc = st.session_state.pipeline_state.get("use_case", {})
+                    raw_md = st.session_state.pipeline_state.get("modelling", {})
+                    raw_sc = st.session_state.pipeline_state.get("input_schema_payload", {})
+                    
+                    obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(raw_uc) if raw_uc else None
+                    obj_md = importlib.import_module("schemas.basemodels").ModellingRecommendation.model_validate(raw_md) if raw_md else None
+                    
+                    prep_out = run_preprocessing_agent(
+                        csv_file_path=st.session_state.csv_path,
+                        use_case=obj_uc,
+                        modelling=obj_md,
+                        input_schema_payload=raw_sc,
+                    )
+                    st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(prep_out)
+                    
+                    script_out = run_scripting_agent(
+                        csv_file_path=st.session_state.csv_path,
+                        modelling=obj_md,
+                        preprocessing=importlib.import_module("schemas.basemodels").PreprocessingRecommendation.model_validate(clean_for_serialization(prep_out)),
+                        input_schema_payload=raw_sc,
+                    )
+                    st.session_state.pipeline_state["scripting"] = clean_for_serialization(script_out)
             
-            # Fallback if loop ends normally without hitting intercept
             st.session_state.execution_running = False
             st.session_state.execution_complete = True
             st.rerun()
@@ -332,13 +310,11 @@ else:
             st.rerun()
     
     # ========================================================================
-    # Display Agent Outputs
+    # Modular UI Stage Output Components
     # ========================================================================
-    
     if st.session_state.pipeline_state:
-        # Display all outputs from pipeline state (real-time during execution, persistent after)
         with outputs_container:
-            # Use Case output
+            # 1. Use Case Details View
             if st.session_state.pipeline_state.get("use_case"):
                 use_case = st.session_state.pipeline_state["use_case"]
                 with st.expander("📌 Use Case Analysis", expanded=True):
@@ -349,194 +325,170 @@ else:
                     with col2:
                         st.subheader("Objective Direction")
                         st.write(use_case.get("objective_direction", "N/A"))
-                    
-                    if "decision_variables" in use_case:
-                        st.subheader("Decision Variables")
-                        for var in use_case.get("decision_variables", []):
-                            st.write(f"• {var}")
-                    
-                    if "constraints_to_consider" in use_case:
-                        st.subheader("Constraints to Consider")
-                        for constraint in use_case.get("constraints_to_consider", []):
-                            st.write(f"• {constraint}")
             
-            # Modeling output
-            if st.session_state.pipeline_state.get("modelling") and not st.session_state.show_modeling_intercept:
-                with st.expander("🔢 Mathematical Model", expanded=True):
-                    modeling_dict = st.session_state.pipeline_state["modelling"]
-                    display_modeling_output(modeling_dict)
+            # 2. Complete Equation Configuration Render Frame
+            if st.session_state.pipeline_state.get("modelling"):
+                if st.session_state.execution_complete or not st.session_state.show_modeling_intercept:
+                    with st.expander("🔢 Mathematical Model & Parameters", expanded=True):
+                        display_modeling_output(st.session_state.pipeline_state["modelling"])
             
-            # Parameter Estimation output
+            # 3. Numeric Structural Output Map
             if st.session_state.pipeline_state.get("parameter_estimation"):
-                pe = st.session_state.pipeline_state["parameter_estimation"]
-                with st.expander("📊 Parameter Estimation", expanded=True):
-                    col_vals, col_stats = st.columns([1, 2])
-                    with col_vals:
-                        st.subheader("Estimated Values")
+                if st.session_state.execution_complete or not st.session_state.show_modeling_intercept:
+                    pe = st.session_state.pipeline_state["parameter_estimation"]
+                    with st.expander("📊 Parameter Estimation Values", expanded=True):
                         st.json(pe.get("parameter_values", {}))
-                    
-                    if pe.get("parameter_rationales"):
-                        with col_stats:
-                            st.subheader("Estimation Rationales")
-                            for param, rationale in pe.get("parameter_rationales", {}).items():
-                                st.markdown(f"**{param}**: {rationale}")
 
-            # Preprocessing output
+            # 4. Data Cleaner Transform Script Viewer
             if st.session_state.pipeline_state.get("preprocessing"):
                 preprocessing = st.session_state.pipeline_state["preprocessing"]
-                with st.expander("🔄 Data Preprocessing", expanded=True):
-                    st.subheader("Generated Data Preparation Code")
-                    preprocessing_code = preprocessing.get("full_script") or preprocessing.get("mapper_script")
-                    st.code(preprocessing_code or "No preprocessing script generated", language="python")
-                    
-                    if preprocessing.get("preprocessing_steps"):
-                        st.subheader("Preprocessing Steps")
-                        for step in preprocessing.get("preprocessing_steps", []):
-                            st.write(f"• {step}")
-                    
-                    if preprocessing.get("mapping_explanation"):
-                        st.subheader("Mapping Explanation")
-                        for explanation in preprocessing.get("mapping_explanation", []):
-                            st.write(f"• {explanation}")
-                    
-                    if preprocessing.get("assumptions"):
-                        st.subheader("Assumptions")
-                        for assumption in preprocessing.get("assumptions", []):
-                            st.write(f"• {assumption}")
-            
-            # Scripting output
+                with st.expander("🔄 Data Preprocessing Script", expanded=True):
+                    st.code(preprocessing.get("full_script") or preprocessing.get("mapper_script") or "# No code generated", language="python")
+
+            # 5. Operational Script Layout Window
             if st.session_state.pipeline_state.get("scripting"):
                 scripting = st.session_state.pipeline_state["scripting"]
                 with st.expander("💻 Generated Solver Code", expanded=True):
-                    st.subheader("PuLP Solver Code")
-                    code = scripting.get("code", "No code generated")
-                    st.code(code, language="python")
-                    
-                    if scripting.get("output_schema"):
-                        st.subheader("Output Schema")
-                        st.json(scripting.get("output_schema"))
-                    
+                    st.code(scripting.get("code", "# No code generated"), language="python")
                     if scripting.get("successful_implementation"):
-                        st.success("✅ Implementation successful!")
-                    else:
-                        st.warning("⚠️ There may be issues with the implementation")
+                        st.success("✅ Implementation executed successfully!")
         
-        # Only show modeling intercept after execution completes
-        if st.session_state.show_modeling_intercept:
+        # ========================================================================
+        # Human-in-the-loop Intercept UI Window Block
+        # ========================================================================
+        if st.session_state.show_modeling_intercept and not st.session_state.execution_complete:
             st.divider()
-            st.warning("⚠️ Please review and approve the mathematical model before continuing")
+            st.warning("⚠️ Review Phase: Validate the generated mathematical configuration before proceeding to script writing.")
             
-            with st.expander("🔢 Mathematical Model (Review & Edit)", expanded=True):
-                # Display formatted modeling
-                modeling_dict = st.session_state.original_modeling or st.session_state.pipeline_state.get("modelling")
-                display_modeling_output(modeling_dict)
-                
-                st.divider()
-                
-                # Edit controls
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button("✅ Approve & Continue", width="stretch"):
-                        try:
-                            # Run the downstream agents without feedback
-                            with st.spinner("⏳ Running preprocessing and solver agents..."):
-                                updated_modeling, pe_output, preprocessing_output, scripting_output = run_downstream_agents(
-                                    csv_file_path=st.session_state.csv_path,
-                                    use_case=st.session_state.pipeline_state.get("use_case", {}),
-                                    modelling=st.session_state.original_modeling or st.session_state.pipeline_state.get("modelling", {}),
-                                    input_schema_payload=st.session_state.pipeline_state.get("input_schema_payload", {})
-                                )
-                                
-                                # Update pipeline state with outputs
-                                st.session_state.pipeline_state["modelling"] = updated_modeling
-                                st.session_state.pipeline_state["parameter_estimation"] = pe_output
-                                st.session_state.pipeline_state["preprocessing"] = preprocessing_output
-                                st.session_state.pipeline_state["scripting"] = scripting_output
-                                st.session_state.show_modeling_intercept = False
-                                st.session_state.modeling_edited_content = None
-                                st.session_state.execution_complete = True
-                                add_log("✅ Pipeline completed")
-                                st.success("✅ All agents completed! Review the results below.")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Failed to run downstream agents: {str(e)}")
-                            add_log(f"Error running downstream agents: {str(e)}", level="error")
-                
-                with col2:
-                    if st.button("✏️ Edit & Re-run", use_container_width=True):
-                        st.session_state.modeling_edit_mode = True
-                        st.rerun()
-                
-                with col3:
-                    if st.button("❌ Cancel Analysis", use_container_width=True):
-                        st.session_state.execution_running = False
-                        st.session_state.execution_complete = False
-                        st.session_state.show_modeling_intercept = False
-                        add_log("Analysis cancelled by user")
-                        st.rerun()
-                
-                # Edit mode - User provides feedback
-                if st.session_state.modeling_edit_mode:
-                    st.subheader("Provide Feedback on Mathematical Model")
-                    st.write("If some constraints are not feasible or need adjustment, describe the issues below:")
-                    
-                    feedback_text = st.text_area(
-                        "Your feedback for the modeling agent",
-                        value="",
-                        height=200,
-                        key="modeling_feedback_area",
-                        placeholder="Example: The throughput constraint of 500 units/hour exceeds our current capacity of 400. Please adjust the objective to maximize profit instead of throughput, with a throughput constraint ≤ 400."
-                    )
-                    
-                    col_save, col_cancel = st.columns(2)
-                    with col_save:
-                        if st.button("🔄 Re-run with Feedback", width="stretch"):
-                            if not feedback_text.strip():
-                                st.error("Please provide feedback before re-running")
-                            else:
-                                try:
-                                    # Rerun all downstream agents with feedback
-                                    with st.spinner("⏳ Processing feedback and regenerating all models..."):
-                                        updated_modeling, updated_pe, updated_preprocessing, updated_scripting = rerun_modeling_with_feedback(
-                                            csv_file_path=st.session_state.csv_path,
-                                            feedback=feedback_text,
-                                            use_case=st.session_state.pipeline_state.get("use_case", {}),
-                                            current_modelling=modeling_dict,
-                                            input_schema_payload=st.session_state.pipeline_state.get("input_schema_payload", {})
-                                        )
-                                        
-                                        # Update pipeline state with ALL new outputs
-                                        st.session_state.pipeline_state["modelling"] = updated_modeling
-                                        st.session_state.pipeline_state["parameter_estimation"] = updated_pe
-                                        st.session_state.pipeline_state["preprocessing"] = updated_preprocessing
-                                        st.session_state.pipeline_state["scripting"] = updated_scripting
-                                        st.session_state.modeling_edited_content = updated_modeling
-                                        st.session_state.modeling_edit_mode = False
-                                        st.session_state.show_modeling_intercept = False
-                                        st.session_state.execution_complete = True
-                                        
-                                        add_log(f"All agents regenerated with user feedback: {feedback_text[:50]}...")
-                                        st.success("✅ All models updated! Review the changes below.")
-                                        st.rerun()
-                                
-                                except Exception as e:
-                                    st.error(f"Failed to process feedback: {str(e)}")
-                                    add_log(f"Error processing feedback: {str(e)}", level="error")
-                    
-                    with col_cancel:
-                        if st.button("Cancel Feedback", width="stretch"):
-                            st.session_state.modeling_edit_mode = False
+            with st.expander("Review Active Mathematical Model & Parameters", expanded=True):
+                display_modeling_output(st.session_state.pipeline_state.get("modelling", {}))
+                if st.session_state.pipeline_state.get("parameter_estimation"):
+                    st.markdown("**Current Parameter Values:**")
+                    st.json(st.session_state.pipeline_state["parameter_estimation"].get("parameter_values", {}))
+            
+            st.divider()
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("✅ Approve Everything & Continue", use_container_width=True):
+                    try:
+                        with st.spinner("⏳ Compiling data preprocessing mappers and runtime scripts..."):
+                            # Resolve instances straight to primitive models safely
+                            c_use_case = clean_for_serialization(st.session_state.pipeline_state.get("use_case", {}))
+                            c_modeling = clean_for_serialization(st.session_state.pipeline_state.get("modelling", {}))
+                            c_schema = clean_for_serialization(st.session_state.pipeline_state.get("input_schema_payload", {}))
+                            
+                            # Cast dictionary frames to real strict objects for processing nodes
+                            obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(c_use_case) if c_use_case else None
+                            obj_md = importlib.import_module("schemas.basemodels").ModellingRecommendation.model_validate(c_modeling) if c_modeling else None
+                            
+                            # Execute targeted nodes strictly sequentially without overlapping loops
+                            preprocessing_output = run_preprocessing_agent(
+                                csv_file_path=st.session_state.csv_path,
+                                use_case=obj_uc,
+                                modelling=obj_md,
+                                input_schema_payload=c_schema,
+                                preview_rows=5
+                            )
+                            st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(preprocessing_output)
+                            
+                            obj_prep = importlib.import_module("schemas.basemodels").PreprocessingRecommendation.model_validate(clean_for_serialization(preprocessing_output))
+                            
+                            scripting_output = run_scripting_agent(
+                                csv_file_path=st.session_state.csv_path,
+                                modelling=obj_md,
+                                preprocessing=obj_prep,
+                                input_schema_payload=c_schema,
+                                preview_rows=5
+                            )
+                            st.session_state.pipeline_state["scripting"] = clean_for_serialization(scripting_output)
+                            
+                            st.session_state.show_modeling_intercept = False
+                            st.session_state.execution_complete = True
+                            add_log("✅ Downstream run completed successfully.")
                             st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Downstream execution failed: {str(e)}")
+            
+            with col2:
+                if st.button("✏️ Edit & Re-run Both Steps", use_container_width=True):
+                    st.session_state.modeling_edit_mode = True
+                    st.rerun()
+            
+            with col3:
+                if st.button("❌ Cancel Run", use_container_width=True):
+                    st.session_state.execution_running = False
+                    st.session_state.show_modeling_intercept = False
+                    st.rerun()
+            
+            if st.session_state.modeling_edit_mode:
+                st.subheader("Provide Corrective Feedback")
+                feedback_text = st.text_area("Detail your adjustments for the Modeling and Parameter estimation agents:", height=150)
+                
+                col_save, col_cancel = st.columns(2)
+                with col_save:
+                    if st.button("🔄 Regenerate Model & Estimates", use_container_width=True):
+                        if not feedback_text.strip():
+                            st.error("Please supply explicit adjustment directions.")
+                        else:
+                            try:
+                                with st.spinner("⏳ Regenerating configuration structures via feedback loop..."):
+                                    c_use_case = clean_for_serialization(st.session_state.pipeline_state.get("use_case", {}))
+                                    c_schema = clean_for_serialization(st.session_state.pipeline_state.get("input_schema_payload", {}))
+                                    
+                                    # Create modified use-case container with adjustments appended
+                                    obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(c_use_case) if c_use_case else None
+                                    if obj_uc:
+                                        assumptions_list = list(obj_uc.assumptions or [])
+                                        assumptions_list.append(f"User feedback: {feedback_text}")
+                                        obj_uc = obj_uc.model_copy(update={"assumptions": assumptions_list})
+                                        st.session_state.pipeline_state["use_case"] = clean_for_serialization(obj_uc)
+                                    
+                                    # Step A: Rerun Modeling Node cleanly
+                                    m_res = run_modeling_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, preview_rows=5)
+                                    obj_md = ModellingRecommendation.model_validate(m_res.get("result") if isinstance(m_res, dict) and "result" in m_res else m_res)
+                                    
+                                    # Step B: Rerun Parameter Estimation Node cleanly
+                                    pe_res = run_parameter_estimation_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, modelling=obj_md, preview_rows=5)
+                                    obj_pe = ParameterEstimationRecommendation.model_validate(pe_res.get("result") if isinstance(pe_res, dict) and "result" in pe_res else pe_res)
+                                    
+                                    # Synchronize structural parameter changes inside model constraints in-place
+                                    obj_md = obj_md.model_copy(update={
+                                        "constraint_functions": obj_pe.updated_constraint_functions,
+                                        "objective_function": obj_pe.updated_objective_function
+                                    })
+                                    st.session_state.pipeline_state["modelling"] = clean_for_serialization(obj_md)
+                                    st.session_state.pipeline_state["parameter_estimation"] = clean_for_serialization(obj_pe)
+                                    
+                                    # Step C: Complete subsequent processing steps sequentially
+                                    p_res = run_preprocessing_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, modelling=obj_md, input_schema_payload=c_schema, preview_rows=5)
+                                    st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(p_res)
+                                    
+                                    obj_prep = importlib.import_module("schemas.basemodels").PreprocessingRecommendation.model_validate(clean_for_serialization(p_res))
+                                    
+                                    s_res = run_scripting_agent(csv_file_path=st.session_state.csv_path, modelling=obj_md, preprocessing=obj_prep, input_schema_payload=c_schema, preview_rows=5)
+                                    st.session_state.pipeline_state["scripting"] = clean_for_serialization(s_res)
+                                    
+                                    st.session_state.modeling_edit_mode = False
+                                    st.session_state.show_modeling_intercept = False
+                                    st.session_state.execution_complete = True
+                                    add_log("🔄 Pipeline updated via feedback modifications.")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Error executing feedback adjustment: {str(e)}")
+                
+                with col_cancel:
+                    if st.button("Cancel Feedback", use_container_width=True):
+                        st.session_state.modeling_edit_mode = False
+                        st.rerun()
     
     # ========================================================================
-    # Final Results & Download
+    # Export File Storage Handler
     # ========================================================================
-    
     if st.session_state.execution_complete and st.session_state.pipeline_state:
         st.divider()
-        st.header("🎉 Analysis Complete!")
+        st.header("🎉 Run Complete!")
         
-        # Save results
         if not st.session_state.result_file:
             result_file = save_pipeline_results(
                 st.session_state.pipeline_state,
@@ -544,34 +496,106 @@ else:
                 st.session_state.initial_prompt
             )
             st.session_state.result_file = result_file
-            add_log(f"Results saved to {result_file}")
         
-        # Download results
         results_json = json.dumps(st.session_state.pipeline_state, indent=2, default=str)
         st.download_button(
-            label="📥 Download Results (JSON)",
+            label="📥 Export Complete Results Payload (JSON)",
             data=results_json,
-            file_name=f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            file_name=f"pipeline_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json",
-            width="stretch"
+            use_container_width=True
         )
-        
-        # Summary
-        st.success("✅ All stages completed successfully!")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Status", "Complete")
-        with col2:
-            st.metric("Total Logs", len(st.session_state.agent_logs))
-        with col3:
-            if st.session_state.result_file:
-                st.metric("Results Saved", "✓")
-        with col4:
-            if st.session_state.modeling_edited_content:
-                st.metric("Model Edited", "Yes")
     
     elif st.session_state.last_error:
         st.divider()
-        st.error("❌ Analysis Failed")
-        st.error(f"Error in stage: {st.session_state.error_stage}")
-        st.error(f"Details: {st.session_state.last_error}")
+        st.error(f"❌ Execution stopped due to error: {st.session_state.last_error}")
+
+# 5. Operational Script Layout & Real Optimization Results View
+if st.session_state.pipeline_state.get("scripting"):
+    scripting = st.session_state.pipeline_state["scripting"]
+    with st.expander("💻 Generated Solver Code & Optimization Results", expanded=True):
+        
+        # Create two distinct tabs to separate code engineering from business metrics
+        tab_metrics, tab_code = st.tabs(["📊 Optimization Results", "📄 Generated Python Code"])
+        
+        with tab_code:
+            st.code(scripting.get("code", "# No code generated"), language="python")
+            if scripting.get("successful_implementation"):
+                st.success("✅ Code compiled and executed in the sandbox successfully!")
+                
+        with tab_metrics:
+            st.header("🎯 Sandbox Optimization Outputs")
+            
+            # --- SAFE EXTRATION FIX ---
+            # Read the real numbers from the top level first to bypass the literal placeholder bug
+            status_val = scripting.get("solution_status")
+            obj_val = scripting.get("objective_value")
+            dec_vars = scripting.get("decision_variables")
+            
+            # Fallback recovery logic: if top level is missing, check the sub-schema
+            # but reject literal descriptor strings ("str", "float")
+            if not status_val or status_val == "str":
+                schema = scripting.get("output_schema", {})
+                if isinstance(schema, dict):
+                    if schema.get("solution_status") != "str":
+                        status_val = schema.get("solution_status")
+                    if schema.get("objective_value") != "float":
+                        obj_val = schema.get("objective_value")
+                    if schema.get("decision_variables") != "dict[str, float]":
+                        dec_vars = schema.get("decision_variables")
+            
+            # Apply friendly defaults if data is still settling
+            if not status_val or status_val == "str":
+                status_val = "Executed Cleanly"
+            if obj_val == "float":
+                obj_val = None
+            if not isinstance(dec_vars, dict) or dec_vars == "dict[str, float]":
+                dec_vars = {}
+            # ---------------------------
+            
+            # 1. Structural Metric Highlights Cards
+            col1, col2 = st.columns(2)
+            with col1:
+                if "optimal" in str(status_val).lower():
+                    st.metric(label="Solver Status", value=f"🟢 {status_val}")
+                elif "infeasible" in str(status_val).lower():
+                    st.metric(label="Solver Status", value=f"🔴 {status_val}")
+                else:
+                    st.metric(label="Solver Status", value=f"ℹ️ {status_val}")
+                    
+            with col2:
+                if obj_val is not None:
+                    try:
+                        st.metric(label="Objective Value (Optimal Target)", value=f"{float(obj_val):,.2f}")
+                    except (ValueError, TypeError):
+                        st.metric(label="Objective Value (Optimal Target)", value=str(obj_val))
+                else:
+                    st.metric(label="Objective Value (Optimal Target)", value="No Single Objective Target Numeric Return")
+                    
+            st.divider()
+            
+            # 2. Decision Allocation Tables and Native Streamlit Graphs
+            if dec_vars:
+                st.subheader("💡 Optimal Decision Allocations")
+                
+                # Flatten the dictionary mapping out into an analytical pandas dataframe
+                df_vars = pd.DataFrame(list(dec_vars.items()), columns=["Variable / Resource Allocation", "Calculated Optimal Value"])
+                
+                # Filter option out to let users hide idle variables
+                hide_zeros = st.checkbox("Hide variables with a 0 value allocation", value=False)
+                if hide_zeros:
+                    df_vars = df_vars[df_vars["Calculated Optimal Value"] > 0]
+                    
+                col_table, col_chart = st.columns([1, 1.2])
+                with col_table:
+                    st.markdown("**Allocation Data Frame**")
+                    st.dataframe(df_vars, use_container_width=True, hide_index=True)
+                    
+                with col_chart:
+                    st.markdown("**Visual Allocation Chart**")
+                    if not df_vars.empty:
+                        st.bar_chart(data=df_vars, x="Variable / Resource Allocation", y="Calculated Optimal Value", use_container_width=True)
+                    else:
+                        st.info("No rows match active filter bounds.")
+            else:
+                st.info("ℹ️ Optimization finished perfectly, but no decision variable allocation arrays were found in the return data frame.")

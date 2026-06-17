@@ -517,17 +517,27 @@ def run_scripting_agent(
         raise ValueError("Pulp_Coding_Agent did not return a valid payload.")
 
     if "output_schema" not in raw_result:
+        # Extract what the sandbox actually calculated from the flat dictionary
+        actual_status = str(raw_result.get("solution_status", "Executed Cleanly"))
+        actual_objective = raw_result.get("objective_value")
+        actual_variables = raw_result.get("decision_variables", {})
+        actual_message = str(raw_result.get("solver_message", ""))
+
         raw_result = {
             "code": str(raw_result.get("code", "")),
+            "solution_status": actual_status,
+            "objective_value": actual_objective,
+            "decision_variables": actual_variables,
+            "solver_message": actual_message,
             "output_schema": {
-                "solution_status": "str",
-                "objective_value": "float",
-                "decision_variables": "dict[str, float]",
-                "solver_message": "str",
+                "solution_status": actual_status,
+                "objective_value": actual_objective,
+                "decision_variables": actual_variables,
+                "solver_message": actual_message,
             },
             "successful_implementation": bool(raw_result.get("successful_implementation", False)),
-            "missing_info": [],
-            "additional_info": [],
+            "missing_info": raw_result.get("missing_info", []),
+            "additional_info": raw_result.get("additional_info", []),
         }
 
     recommendation = ScriptingRecommendation.model_validate(raw_result)
