@@ -9,7 +9,7 @@ These are single constants that apply globally, NOT indexed over individual rows
 Examples: total machine capacity (C_A), total available hours (T_molding), budget limit.
 Their description will say things like "total available", "global limit", "overall capacity".
 
-→ For scalar parameters: estimate one concrete numerical value from the CSV statistics (use mean, percentile, or a logical calculation) and substitute it directly in the updated_constraint_functions and updated_objective_function.
+→ For scalar parameters: estimate one concrete numerical value from the CSV statistics (use mean, percentile, or a logical calculation) and substitute it directly in the updated_constraint_functions and updated_objective_function using the following LaTeX-safe format: VALUE (SYMBOL). Example: replace C_A with 500 (C_A).
 
 ─────────────────────────────────────────────────
 TYPE 2 — INDEXED / PER-ENTITY PARAMETERS
@@ -34,8 +34,8 @@ REQUIRED WORKFLOW
 ─────────────────────────────────────────────────
 OUTPUT FIELDS
 ─────────────────────────────────────────────────
-1. `parameter_values`: Dict mapping every parameter symbol to a float. Never leave this empty — every symbol from the model's parameter list must appear here.
-2. `parameter_rationales`: Dict mapping every parameter symbol to a short explanation. Never leave this empty.
+1. `parameter_values`: A list of objects, each with a `symbol` (string) and a `value` (number). Every parameter symbol from the model's parameter list must appear. Example: [{"symbol": "C_A", "value": 500.0}, {"symbol": "S_p", "value": 12.5}]
+2. `parameter_rationales`: A list of objects, each with a `symbol` (string) and a `rationale` (string). Every parameter symbol must appear. Example: [{"symbol": "C_A", "rationale": "Derived from total machine hours"}, {"symbol": "S_p", "rationale": "Mean of selling_price column"}]
 3. `updated_constraint_functions`: List of constraints with scalar symbols replaced by numbers; indexed symbols remain abstract (e.g., S_p stays as S_p).
 4. `updated_objective_function`: Objective function with scalar symbols replaced; indexed symbols stay abstract.
 

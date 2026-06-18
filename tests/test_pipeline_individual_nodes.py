@@ -156,8 +156,8 @@ def test_run_agent_node_parameter_estimation_consumes_state(monkeypatch: Any) ->
     def fake_run_parameter_estimation_agent(**kwargs: Any) -> ParameterEstimationRecommendation:
         captured.update(kwargs)
         return ParameterEstimationRecommendation(
-            parameter_values={"C_A": 500.0},
-            parameter_rationales={"C_A": "estimated limit"},
+            parameter_values=[{"symbol": "C_A", "value": 500.0}],
+            parameter_rationales=[{"symbol": "C_A", "rationale": "estimated limit"}],
             updated_constraint_functions=["x <= 500"],
             updated_objective_function="max z",
             updated_readable_documentation="# Model Concrete",
@@ -198,7 +198,8 @@ def test_run_agent_node_parameter_estimation_consumes_state(monkeypatch: Any) ->
     )
 
     assert result_state.parameter_estimation is not None
-    assert result_state.parameter_estimation.parameter_values == {"C_A": 500.0}
+    assert result_state.parameter_estimation.parameter_values[0].symbol == "C_A"
+    assert result_state.parameter_estimation.parameter_values[0].value == 500.0
     assert result_state.modelling.constraint_functions == ["x <= 500"]
     assert result_state.traces[-1] == "parameter_estimation:ok"
 

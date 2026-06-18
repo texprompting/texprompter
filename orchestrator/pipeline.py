@@ -490,6 +490,11 @@ def run_preprocessing_agent(
     return recommendation
 
 
+from typing import Any
+import sys
+import traceback
+from agents.Pulp_Coding_Agent import run_pulp_coding_agent
+
 def run_scripting_agent(
     csv_file_path: str,
     modelling: ModellingRecommendation | None,
@@ -502,8 +507,6 @@ def run_scripting_agent(
     if not resolved_csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
 
-    from agents.Pulp_Coding_Agent import run_pulp_coding_agent
-
     raw_payload = run_pulp_coding_agent(
         csv_file_path=str(resolved_csv_path),
         modelling=modelling,
@@ -513,34 +516,170 @@ def run_scripting_agent(
         return_debug=return_debug,
     )
     raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_payload)
+
     if not isinstance(raw_result, dict):
         raise ValueError("Pulp_Coding_Agent did not return a valid payload.")
 
-    if "output_schema" not in raw_result:
-        # Extract what the sandbox actually calculated from the flat dictionary
-        actual_status = str(raw_result.get("solution_status", "Executed Cleanly"))
-        actual_objective = raw_result.get("objective_value")
-        actual_variables = raw_result.get("decision_variables", {})
-        actual_message = str(raw_result.get("solver_message", ""))
+    # --- NEW: DYNAMIC CODE EXECUTION SANDBOX ---
+    generated_code = raw_result.get("code", "")
+    execution_success = False
+    additional_info = list(raw_result.get("additional_info", []))
+    
+    # Defaults in case execution completely crashes
+    actual_status = "Execution Failed"
+    actual_objective = None
+    actual_variables = {}
+    actual_message = ""
 
-        raw_result = {
-            "code": str(raw_result.get("code", "")),
+    if generated_code:
+        try:
+            import pandas as pd
+            real_read_csv = pd.read_csv
+            def mock_read_csv(*args, **kwargs):
+                # Always load the actual pipeline CSV path, overriding hardcoded temp paths
+                return real_read_csv(str(resolved_csv_path), *args, **kwargs)
+
+            # Create an isolated local execution scope
+            local_scope: dict[str, Any] = {}
+            
+            # Execute the generated code with read_csv mocked
+            try:
+                pd.read_csv = mock_read_csv
+                exec(generated_code, local_scope)
+            finally:
+                pd.read_csv = real_read_csv
+
+            # Locate and run the target function if present
+            optimization_output = None
+            if "solve_model" in local_scope and callable(local_scope["solve_model"]):
+                import inspect
+                func = local_scope["solve_model"]
+                sig = inspect.signature(func)
+                if len(sig.parameters) > 0:
+                    optimization_output = func(str(resolved_csv_path))
+                else:
+                    optimization_output = func()
+
+            # Initialize extracted values
+            temp_status = None
+            temp_objective = None
+            temp_variables = {}
+            temp_message = ""
+
+            if isinstance(optimization_output, dict):
+                temp_status = optimization_output.get("solution_status")
+                temp_objective = optimization_output.get("objective_value")
+                temp_variables = optimization_output.get("decision_variables")
+                temp_message = optimization_output.get("solver_message")
+                execution_success = True
+
+            # Fallback extraction from local_scope variables (for flat scripts or simple returns)
+            if not execution_success or temp_status is None:
+                # 1. Try to find a dict called 'output'
+                output_dict = local_scope.get("output")
+                if isinstance(output_dict, dict):
+                    temp_status = output_dict.get("solution_status") or temp_status
+                    temp_objective = output_dict.get("objective_value") if output_dict.get("objective_value") is not None else temp_objective
+                    temp_variables = output_dict.get("decision_variables") or temp_variables
+                    temp_message = output_dict.get("solver_message") or temp_message
+                    execution_success = True
+
+                # 2. Try to find any pulp.LpProblem object
+                pulp_problem = None
+                for val in local_scope.values():
+                    if type(val).__name__ == "LpProblem":
+                        pulp_problem = val
+                        break
+
+                if pulp_problem is not None:
+                    import pulp
+                    status_code = pulp_problem.status
+                    if status_code in pulp.LpStatus:
+                        temp_status = pulp.LpStatus[status_code]
+                    else:
+                        temp_status = "Optimal" if status_code == 1 else "Not Solved"
+                    
+                    temp_objective = pulp.value(pulp_problem.objective)
+                    
+                    variables_dict = {}
+                    for var in pulp_problem.variables():
+                        name = var.name
+                        if name.startswith("x_"):
+                            name = name[2:]
+                        variables_dict[name] = var.varValue
+                    temp_variables = variables_dict or temp_variables
+                    temp_message = f"Extracted from Pulp Problem: {temp_status}"
+                    execution_success = True
+
+                # 3. Try individual variables from local_scope
+                if not temp_status:
+                    for k in ["solution_status", "status"]:
+                        if k in local_scope:
+                            val = local_scope[k]
+                            if isinstance(val, int):
+                                import pulp
+                                temp_status = pulp.LpStatus.get(val, str(val))
+                            else:
+                                temp_status = str(val)
+                            break
+                if temp_objective is None:
+                    for k in ["objective_value", "obj_val", "objective"]:
+                        if k in local_scope and isinstance(local_scope[k], (int, float)):
+                            temp_objective = float(local_scope[k])
+                            break
+                if not temp_variables:
+                    for k in ["decision_variables", "x_values", "variables"]:
+                        if k in local_scope and isinstance(local_scope[k], dict):
+                            temp_variables = local_scope[k]
+                            break
+                if not temp_message:
+                    for k in ["solver_message", "message"]:
+                        if k in local_scope:
+                            temp_message = str(local_scope[k])
+                            break
+
+                if temp_status or temp_objective is not None or temp_variables:
+                    execution_success = True
+
+            # Map the temporary variables to actual values with fallbacks
+            actual_status = str(temp_status) if temp_status else "Optimal"
+            actual_objective = float(temp_objective) if temp_objective is not None else None
+            actual_variables = temp_variables if isinstance(temp_variables, dict) else {}
+            actual_message = str(temp_message) if temp_message else f"Solver status: {actual_status}"
+
+        except Exception as e:
+            # Catch compilation or runtime evaluation errors safely without crashing the orchestrator
+            exc_type, exc_value, _ = sys.exc_info()
+            error_msg = f"Runtime optimization failure: {exc_type.__name__ if exc_type else 'Exception'}: {exc_value}"
+            additional_info.append(error_msg)
+            actual_message = error_msg
+    else:
+        additional_info.append("Error: No code string was provided by the coding agent.")
+
+    # --- RESTRUCTURE PAYLOAD WITH REAL MATH RESULTS ---
+    raw_result = {
+        "code": generated_code,
+        "solution_status": actual_status,
+        "objective_value": actual_objective,
+        "decision_variables": actual_variables,
+        "solver_message": actual_message,
+        "output_schema": {
             "solution_status": actual_status,
             "objective_value": actual_objective,
             "decision_variables": actual_variables,
             "solver_message": actual_message,
-            "output_schema": {
-                "solution_status": actual_status,
-                "objective_value": actual_objective,
-                "decision_variables": actual_variables,
-                "solver_message": actual_message,
-            },
-            "successful_implementation": bool(raw_result.get("successful_implementation", False)),
-            "missing_info": raw_result.get("missing_info", []),
-            "additional_info": raw_result.get("additional_info", []),
-        }
+        },
+        # Consider it fully successful only if the agent made it and the solver successfully hit an optimal solution
+        "successful_implementation": execution_success and (actual_status.lower() in ["optimal", "executed cleanly"]),
+        "missing_info": raw_result.get("missing_info", []),
+        "additional_info": additional_info,
+    }
+    print("----------------------------Script results---------------------------------")
+    print(raw_result)
 
     recommendation = ScriptingRecommendation.model_validate(raw_result)
+
+    print(recommendation)
 
     if return_debug:
         return {

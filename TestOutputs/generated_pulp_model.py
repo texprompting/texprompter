@@ -1,61 +1,82 @@
 import pandas as pd
 import pulp
-import json
+from typing import Any
 
-def solve_optimization(csv_path):
-    # Load data
+def solve_model(csv_path: str) -> dict[str, Any]:
+    # Load the dataset
     df = pd.read_csv(csv_path)
     
-    # Extract sets and parameters
-    P = df['Product_ID'].tolist()
-    Profit = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()
-    MachA = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()
-    MachB = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()
-    Labor = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()
-    Mat = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()
-    MinProd = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()
-    MaxDem = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()
+    # Preprocessing: Ensure correct data types and handle any missing values
+    df['HeatCoverClosed'] = df['HeatCoverClosed'].fillna(0).astype(int)
+    df['Produce'] = df['Produce'].fillna(0).astype(int)
     
-    # Capacities
-    Cap_A = 11000
-    Cap_B = 13000
-    Cap_L = 21600
-    Cap_M = 65000
+    # Define the set of time steps
+    T = df.index.tolist()
     
-    # Define problem
-    prob = pulp.LpProblem("Product_Mix_Optimization", pulp.LpMaximize)
+    # Define parameters as dictionaries indexed by time step t
+    H = df['HeatCoverClosed'].to_dict()
+    R = df['Produce'].to_dict()
     
-    # Decision variables with bounds
-    x = {p: pulp.LpVariable(f"x_{p}", lowBound=MinProd[p], upBound=MaxDem[p], cat='Continuous') for p in P}
+    # Scalar parameters
+    alpha = 15.0
+    beta = 3.0
+    gamma = 0.2
+    P_min = 10.0
     
-    # Objective function
-    prob += pulp.lpSum(Profit[p] * x[p] for p in P), "Total_Profit"
+    # Define the problem (minimizing cost/energy)
+    prob = pulp.LpProblem("Heater_Fan_Optimization", pulp.LpMinimize)
+    
+    # Decision variables
+    # x_t: HeaterOn (binary)
+    # y_t: FanOn (binary)
+    # u_t: HeatingTimePercent (continuous, between 0 and 100)
+    x = pulp.LpVariable.dicts("x", T, cat=pulp.LpBinary)
+    y = pulp.LpVariable.dicts("y", T, cat=pulp.LpBinary)
+    u = pulp.LpVariable.dicts("u", T, lowBound=0, upBound=100, cat=pulp.LpContinuous)
     
     # Constraints
-    prob += pulp.lpSum(MachA[p] * x[p] for p in P) <= Cap_A, "Machine_A_Capacity"
-    prob += pulp.lpSum(MachB[p] * x[p] for p in P) <= Cap_B, "Machine_B_Capacity"
-    prob += pulp.lpSum(Labor[p] * x[p] for p in P) <= Cap_L, "Labor_Capacity"
-    prob += pulp.lpSum(Mat[p] * x[p] for p in P) <= Cap_M, "Material_Capacity"
+    for t in T:
+        # x_t <= H_t
+        prob += x[t] <= H[t], f"HeatCoverClosed_constraint_{t}"
+        # x_t >= R_t
+        prob += x[t] >= R[t], f"Produce_constraint_{t}"
+        # u_t <= 100 * x_t
+        prob += u[t] <= 100 * x[t], f"Max_HeatingTimePercent_{t}"
+        # u_t >= P_min * x_t
+        prob += u[t] >= P_min * x[t], f"Min_HeatingTimePercent_{t}"
+        # y_t >= x_t
+        prob += y[t] >= x[t], f"Fan_Heater_relation_{t}"
+        
+    # Objective function
+    prob += pulp.lpSum(alpha * x[t] + beta * y[t] + gamma * u[t] for t in T)
     
-    # Solve
+    # Solve the problem
     status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
     
-    # Prepare output
-    decision_variables = {p: pulp.value(x[p]) for p in P}
+    # Extract decision variables
+    decision_variables = {}
+    for t in T:
+        decision_variables[f"x_{t}"] = float(x[t].varValue) if x[t].varValue is not None else 0.0
+        decision_variables[f"y_{t}"] = float(y[t].varValue) if y[t].varValue is not None else 0.0
+        decision_variables[f"u_{t}"] = float(u[t].varValue) if u[t].varValue is not None else 0.0
+        
     objective_value = pulp.value(prob.objective)
     solution_status = pulp.LpStatus[status]
-    solver_message = f"Optimization completed with status: {solution_status}"
     
-    output = {
-        "decision_variables": decision_variables,
-        "objective_value": objective_value,
+    return {
         "solution_status": solution_status,
-        "solver_message": solver_message
+        "objective_value": objective_value,
+        "decision_variables": decision_variables,
+        "solver_message": f"Optimization completed with status: {solution_status}"
     }
-    
-    return output
 
 if __name__ == "__main__":
-    csv_path = "/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmph8kdqqit.csv"
-    result = solve_optimization(csv_path)
-    print(json.dumps(result, indent=4))
+    # Example execution with default path
+    import os
+    csv_path = "/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpsmp8c87w.csv"
+    if os.path.exists(csv_path):
+        results = solve_model(csv_path)
+        print("Status:", results["solution_status"])
+        print("Objective Value:", results["objective_value"])
+    else:
+        print(f"File not found: {csv_path}")

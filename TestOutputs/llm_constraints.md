@@ -1,6 +1,5 @@
-\\sum_{p \\in P} A_p x_p \\le C_A
-\\sum_{p \\in P} B_p x_p \\le C_B
-\\sum_{p \\in P} L_p x_p \\le C_L
-\\sum_{p \\in P} R_p x_p \\le C_R
-x_p \\ge M^-_p \\quad \\forall p \\in P
-x_p \\le M^+_p \\quad \\forall p \\in P
+x_t \\le H_t \\quad \\forall t \\in T
+x_t \\ge R_t \\quad \\forall t \\in T
+u_t \\le 100 \\cdot x_t \\quad \\forall t \\in T
+u_t \\ge P_{min} \\cdot x_t \\quad \\forall t \\in T
+y_t \\ge x_t \\quad \\forall t \\in T

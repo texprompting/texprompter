@@ -24,6 +24,8 @@ from agents.shared import (
 )
 from schemas.basemodels import (
     ParameterEstimationRecommendation,
+    ParameterValue,
+    ParameterRationale,
     ModellingRecommendation,
     UseCaseRecommendation,
 )
@@ -49,7 +51,7 @@ def _persist_outputs(recommendation: ParameterEstimationRecommendation) -> None:
         outputs_dir = get_test_outputs_dir()
         outputs_dir.mkdir(parents=True, exist_ok=True)
         (outputs_dir / "llm_parameter_values.json").write_text(
-            json.dumps(recommendation.parameter_values, indent=2),
+            json.dumps(recommendation.values_as_dict(), indent=2),
             encoding="utf-8",
         )
         (outputs_dir / "llm_updated_constraints.md").write_text(
@@ -62,12 +64,31 @@ def _persist_outputs(recommendation: ParameterEstimationRecommendation) -> None:
         warnings.warn(f"_persist_outputs failed (non-fatal): {io_err}", RuntimeWarning, stacklevel=2)
 
 
+def _dict_to_parameter_values(d: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert a {symbol: value} dict into list-of-dicts format for ParameterValue."""
+    return [{"symbol": k, "value": float(v)} for k, v in d.items()]
+
+
+def _dict_to_parameter_rationales(d: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert a {symbol: rationale} dict into list-of-dicts format for ParameterRationale."""
+    return [{"symbol": k, "rationale": str(v)} for k, v in d.items()]
+
+
 def _coerce_recommendation(value: Any) -> ParameterEstimationRecommendation:
     if isinstance(value, ParameterEstimationRecommendation):
         return value
     if isinstance(value, BaseModel):
         return ParameterEstimationRecommendation.model_validate(value.model_dump())
     if isinstance(value, dict):
+        # Handle legacy dict[str, float] format from cached results or alias recovery
+        pv = value.get("parameter_values")
+        if isinstance(pv, dict) and pv and not isinstance(next(iter(pv.values()), None), dict):
+            value = dict(value)
+            value["parameter_values"] = _dict_to_parameter_values(pv)
+        pr = value.get("parameter_rationales")
+        if isinstance(pr, dict) and pr and not isinstance(next(iter(pr.values()), None), dict):
+            value = dict(value)
+            value["parameter_rationales"] = _dict_to_parameter_rationales(pr)
         return ParameterEstimationRecommendation.model_validate(value)
     raise TypeError(f"Unexpected structured_response type: {type(value)!r}")
 
@@ -101,16 +122,20 @@ def run_parameter_estimator_agent(
     # Normalize use case
     if use_case is None:
         use_case_info = {}
-    elif isinstance(use_case, UseCaseRecommendation):
+    elif hasattr(use_case, "model_dump"):
         use_case_info = use_case.model_dump()
+    elif isinstance(use_case, dict):
+        use_case_info = use_case
     else:
         use_case_info = dict(use_case)
 
     # Normalize modelling
     if modelling is None:
         modelling_info = {}
-    elif isinstance(modelling, ModellingRecommendation):
+    elif hasattr(modelling, "model_dump"):
         modelling_info = modelling.model_dump()
+    elif isinstance(modelling, dict):
+        modelling_info = modelling
     else:
         modelling_info = dict(modelling)
 
@@ -145,149 +170,61 @@ def run_parameter_estimator_agent(
     print(response)
     structured = response.get("structured_response")
 
-    # --- INITIAL DEFENSIVE ALIAS RECOVERY LAYER ---
+    # --- START DEFENSIVE ALIAS RECOVERY LAYER ---
+    # If structured response is missing or raw parsing fails, extract raw dict and map keys safely
     if structured is None:
         last_content = _last_ai_content(response.get("messages", []))
         if last_content:
             try:
+                # Attempt to parse whatever JSON text string came out
                 raw_json = json.loads(last_content)
                 if isinstance(raw_json, dict):
-                    structured = ParameterEstimationRecommendation.model_validate(raw_json)
-            except Exception:
-                try:
-                    structured = ParameterEstimationRecommendation.model_validate_json(last_content)
-                except Exception:
-                    pass
-    elif isinstance(structured, dict):
-        try:
-            structured = ParameterEstimationRecommendation.model_validate(structured)
-        except Exception:
-            pass
+                    # Extract parameter values — may be list or dict format
+                    raw_pv = raw_json.get("parameter_values") or raw_json.get("values") or raw_json.get("parameters") or []
+                    if isinstance(raw_pv, dict):
+                        raw_pv = _dict_to_parameter_values(raw_pv)
 
-    # --- NEW DYNAMIC RETRY LOOP LAYER ---
-    retries_left = max_retries
-    current_stage = "parameter_estimation_retry"
+                    raw_pr = raw_json.get("parameter_rationales") or raw_json.get("rationales") or raw_json.get("reasoning") or []
+                    if isinstance(raw_pr, dict):
+                        raw_pr = _dict_to_parameter_rationales(raw_pr)
 
-    while retries_left > 0:
-        needs_retry = False
-        reasons = []
-
-        if structured is not None and isinstance(structured, ParameterEstimationRecommendation):
-            if not structured.updated_constraint_functions:
-                needs_retry = True
-                reasons.append("The field 'updated_constraint_functions' is empty or missing.")
-            if not structured.updated_objective_function:
-                needs_retry = True
-                reasons.append("The field 'updated_objective_function' is empty or missing.")
-            if not structured.parameter_values and modelling_info.get("parameters"):
-                needs_retry = True
-                reasons.append("The field 'parameter_values' is empty, but the model contains abstract parameters to estimate.")
-        else:
-            needs_retry = True
-            reasons.append("Initial response did not parse or produce a structured recommendation.")
-
-        # SUCCESS CONDITION: If no fields are empty, break out of the retry loop completely
-        if not needs_retry:
-            break
-
-        import warnings
-        warnings.warn(
-            f"Empty fields detected. Triggering self-correction retry ({max_retries - retries_left + 1}/{max_retries}). Reasons: {reasons}", 
-            RuntimeWarning, 
-            stacklevel=2
-        )
-        
-        # Build an explicit self-correction critique prompt to force the agent to fill the fields
-        retry_user_message = f"""{user_message}
-        
-        CRITICAL ERROR IN PREVIOUS ATTEMPT:
-        Your previous generation was rejected because one or more required fields came back blank or empty.
-        Specific failures identified: {', '.join(reasons)}
-        
-        Please correct this behavior. You MUST completely fill out the following fields:
-        1. 'updated_objective_function': Substitute the abstract parameter symbols with your estimated aggregate numeric constants from the dataset statistics.
-        2. 'updated_constraint_functions': Substitute the abstract parameter symbols with your estimated aggregate numeric values across all constraints.
-        3. 'parameter_values': Map each abstract parameter symbol to its chosen numeric value.
-        
-        Ensure no field is left blank or empty. Re-generate the full structured format now.
-        """
-        
-        # Re-invoke the agent with the self-correction critique prompt
-        response = invoke_agent_with_prompt_trace(
-            agent,
-            stage=f"{current_stage}_{max_retries - retries_left + 1}",
-            prompt=prompt,
-            user_message=retry_user_message,
-        )
-        print(f"Retry Response ({max_retries - retries_left + 1}):", response)
-        structured = response.get("structured_response")
-        
-        # Defensive coercion on the retry result
-        if structured is None:
-            last_content = _last_ai_content(response.get("messages", []))
-            if last_content:
-                try:
-                    raw_json = json.loads(last_content)
-                    if isinstance(raw_json, dict):
-                        structured = ParameterEstimationRecommendation.model_validate(raw_json)
-                except Exception:
-                    try:
-                        structured = ParameterEstimationRecommendation.model_validate_json(last_content)
-                    except Exception:
-                        pass
-        elif isinstance(structured, dict):
-            try:
-                structured = ParameterEstimationRecommendation.model_validate(structured)
+                    mapped_payload = {
+                        "parameter_values": raw_pv,
+                        "parameter_rationales": raw_pr,
+                        "updated_constraint_functions": raw_json.get("updated_constraint_functions") or raw_json.get("constraints") or raw_json.get("updated_constraints") or [],
+                        "updated_objective_function": raw_json.get("updated_objective_function") or raw_json.get("objective") or raw_json.get("updated_objective") or ""
+                    }
+                    structured = ParameterEstimationRecommendation.model_validate(mapped_payload)
             except Exception:
                 pass
-                
-        retries_left -= 1
-    # --- END RETRY LOOP LAYER ---
+
+    elif isinstance(structured, dict):
+        # Even if 'structured_response' returned a dict, check if Gemini chose intuitive alias keys
+        raw_pv = structured.get("parameter_values") or structured.get("values") or structured.get("parameters") or []
+        if isinstance(raw_pv, dict):
+            raw_pv = _dict_to_parameter_values(raw_pv)
+
+        raw_pr = structured.get("parameter_rationales") or structured.get("rationales") or structured.get("reasoning") or []
+        if isinstance(raw_pr, dict):
+            raw_pr = _dict_to_parameter_rationales(raw_pr)
+
+        mapped_payload = {
+            "parameter_values": raw_pv,
+            "parameter_rationales": raw_pr,
+            "updated_constraint_functions": structured.get("updated_constraint_functions") or structured.get("constraints") or structured.get("updated_constraints") or [],
+            "updated_objective_function": structured.get("updated_objective_function") or structured.get("objective") or structured.get("updated_objective") or ""
+        }
+        try:
+            structured = ParameterEstimationRecommendation.model_validate(mapped_payload)
+        except Exception:
+            pass
+    # --- END DEFENSIVE ALIAS RECOVERY LAYER ---
 
     if structured is None:
         raise ValueError("parameter estimation agent did not produce a structured_response after execution retry loops.")
 
     recommendation = _coerce_recommendation(structured)
 
-    # --- CSV-STATS FALLBACK: populate empty parameter_values from df.describe() means ---
-    if not recommendation.parameter_values and modelling_info:
-        params = modelling_info.get("parameters", [])
-        if params:
-            col_means: dict[str, float] = (
-                df.describe(include="number").loc["mean"].to_dict()
-            )
-            col_mean_lower = {k.lower().replace(" ", "_"): v for k, v in col_means.items()}
-
-            fallback_values: dict[str, float] = {}
-            fallback_rationales: dict[str, str] = {}
-            for param in params:
-                symbol = param.get("symbol", "") if isinstance(param, dict) else getattr(param, "symbol", "")
-                description = param.get("description", "") if isinstance(param, dict) else getattr(param, "description", "")
-                if not symbol:
-                    continue
-                bare = re.sub(r"[_{].*", "", symbol).lower()
-                matched_val: float | None = None
-                for col_key, mean_val in col_means.items():
-                    if bare in col_key.lower() or col_key.lower() in description.lower():
-                        matched_val = round(float(mean_val), 4)
-                        break
-                if matched_val is None:
-                    matched_val = round(float(next(iter(col_means.values()), 0.0)), 4)
-                fallback_values[symbol] = matched_val
-                fallback_rationales[symbol] = (
-                    f"Indexed parameter (per-entity). Representative mean from CSV statistics: {matched_val}. "
-                    "Actual values are sourced per-row from the CSV at solve time."
-                )
-
-            if fallback_values:
-                recommendation = ParameterEstimationRecommendation(
-                    parameter_values=fallback_values,
-                    parameter_rationales=fallback_rationales,
-                    updated_constraint_functions=recommendation.updated_constraint_functions
-                    or modelling_info.get("constraint_functions", []),
-                    updated_objective_function=recommendation.updated_objective_function
-                    or modelling_info.get("objective_function", ""),
-                )
                 
     if modelling_info:
         if not recommendation.updated_constraint_functions:

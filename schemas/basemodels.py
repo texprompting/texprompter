@@ -232,18 +232,36 @@ class ModellingRecommendation(BaseModel):
         return _coerce_nested_model_list(value)
 
 
+class ParameterValue(BaseModel):
+    """A single parameter's estimated numerical value."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    symbol: str = Field(description="Parameter symbol, e.g. 'C_A' or 'S_p'.")
+    value: float = Field(description="Estimated numerical value for this parameter.")
+
+
+class ParameterRationale(BaseModel):
+    """Rationale for a single parameter's estimated value."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    symbol: str = Field(description="Parameter symbol, e.g. 'C_A' or 'S_p'.")
+    rationale: str = Field(description="Explanation of how the value was derived.")
+
+
 class ParameterEstimationRecommendation(BaseModel):
     """Output contract for the parameter estimation agent."""
 
     model_config = ConfigDict(extra="ignore")
 
-    parameter_values: dict[str, float] = Field(
-        default_factory=dict,
-        description="Estimated values for each parameter symbol, for example {'C_A': 500.0}."
+    parameter_values: list[ParameterValue] = Field(
+        default_factory=list,
+        description="Estimated values for each parameter symbol. Each entry has a 'symbol' and 'value'.",
     )
-    parameter_rationales: dict[str, str] = Field(
-        default_factory=dict,
-        description="Reasoning/rationale for the estimated value of each parameter."
+    parameter_rationales: list[ParameterRationale] = Field(
+        default_factory=list,
+        description="Reasoning/rationale for each parameter. Each entry has a 'symbol' and 'rationale'.",
     )
     updated_constraint_functions: list[str] = Field(
         default_factory=list,
@@ -253,15 +271,23 @@ class ParameterEstimationRecommendation(BaseModel):
         description="MILP objective function with parameters replaced by their estimated values."
     )
 
-    @field_validator(
-        "parameter_values",
-        "parameter_rationales",
-        "updated_constraint_functions",
-        mode="before",
-    )
+    @field_validator("parameter_values", "parameter_rationales", mode="before")
     @classmethod
-    def _coerce_collection_fields(cls, value: Any) -> Any:
+    def _coerce_nested_list_fields(cls, value: Any) -> Any:
+        return _coerce_nested_model_list(value)
+
+    @field_validator("updated_constraint_functions", mode="before")
+    @classmethod
+    def _coerce_str_list_fields(cls, value: Any) -> Any:
         return _coerce_json_collection(value)
+
+    def values_as_dict(self) -> dict[str, float]:
+        """Convert parameter_values list back to a {symbol: value} dict for downstream consumers."""
+        return {pv.symbol: pv.value for pv in self.parameter_values}
+
+    def rationales_as_dict(self) -> dict[str, str]:
+        """Convert parameter_rationales list back to a {symbol: rationale} dict for downstream consumers."""
+        return {pr.symbol: pr.rationale for pr in self.parameter_rationales}
 
 
 class PreprocessingRecommendation(BaseModel):
@@ -318,6 +344,24 @@ class ScriptingRecommendation(BaseModel):
         description="Extra diagnostics, warnings, or simplifications.",
     )
 
+    # Execution result fields — populated after sandbox execution, not by the LLM.
+    solution_status: str = Field(
+        default="",
+        description="Solver status from execution, e.g. 'Optimal'.",
+    )
+    objective_value: float | None = Field(
+        default=None,
+        description="Objective value from solver execution.",
+    )
+    decision_variables: dict[str, float] = Field(
+        default_factory=dict,
+        description="Decision variable values from solver execution.",
+    )
+    solver_message: str = Field(
+        default="",
+        description="Solver diagnostic message.",
+    )
+
     @field_validator("successful_implementation", mode="before")
     @classmethod
     def _coerce_bool_field(cls, value: Any) -> Any:
@@ -327,6 +371,7 @@ class ScriptingRecommendation(BaseModel):
         "output_schema",
         "missing_info",
         "additional_info",
+        "decision_variables",
         mode="before",
     )
     @classmethod

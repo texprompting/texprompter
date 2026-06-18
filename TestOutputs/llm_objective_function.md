@@ -1,1 +1,1 @@
-\\sum_{p \\in P} P_p x_p
+\\sum_{t \\in T} (\\alpha \\cdot x_t + \\beta \\cdot y_t + \\gamma \\cdot u_t)

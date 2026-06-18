@@ -113,8 +113,10 @@ def run_mathematical_modelling_agent(
             "assumptions": ["Use-case recommendation missing; fallback context used."],
             "rationale": "Fallback use case injected by modelling stage.",
         }
-    elif isinstance(use_case, UseCaseRecommendation):
+    elif hasattr(use_case, "model_dump"):
         use_case_info = use_case.model_dump()
+    elif isinstance(use_case, dict):
+        use_case_info = use_case
     else:
         use_case_info = dict(use_case)
 

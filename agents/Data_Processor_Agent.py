@@ -118,8 +118,10 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
             }
         }
 
-    if isinstance(modelling, ModellingRecommendation):
+    if hasattr(modelling, "model_dump"):
         model_dict = modelling.model_dump()
+    elif isinstance(modelling, dict):
+        model_dict = modelling
     else:
         model_dict = dict(modelling)
 
@@ -191,8 +193,10 @@ def run_data_processor_agent(
         """Returns upstream use-case contract for preprocessing context."""
         if use_case is None:
             return {}
-        if isinstance(use_case, UseCaseRecommendation):
+        if hasattr(use_case, "model_dump"):
             return use_case.model_dump()
+        elif isinstance(use_case, dict):
+            return use_case
         return dict(use_case)
 
     prompt = load_system_prompt_result("preprocessing")
