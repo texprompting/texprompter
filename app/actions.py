@@ -49,7 +49,7 @@ def _csv_content() -> str:
     return str(st.session_state.csv_file)
 
 
-def execute_pipeline():
+def execute_pipeline(log_renderer=None):
     ensure_csv_path()
 
     displayed_stages = set()
@@ -78,6 +78,8 @@ def execute_pipeline():
                 if isinstance(traces, list):
                     for trace in traces[seen_traces:]:
                         add_log(trace)
+                        if log_renderer is not None:
+                            log_renderer()
                         status.write(f"✓ {trace}")
                     seen_traces = len(traces)
 
@@ -94,6 +96,8 @@ def execute_pipeline():
                             st.session_state.show_modeling_intercept = True
                             st.session_state.execution_running = False
                             add_log("⏸️ Human intercept triggered after Parameter Estimation.")
+                            if log_renderer is not None:
+                                log_renderer()
                             st.rerun()
 
     add_log("Pipeline execution completed.")

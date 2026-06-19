@@ -61,33 +61,21 @@ Default input CSV is `data/optimization_pipeline_test_easy.csv`. Generated artif
 
 ## Dev startup scripts (Unix / Windows)
 
-Interactive launcher at the **`texprompter/`** package root:
+Launch the TexPrompter FastAPI backend and Streamlit UI together from the repo root:
 
-- **Unix:** [`start_texprompter.sh`](start_texprompter.sh)
-- **Windows (PowerShell):** [`start_texprompter.ps1`](start_texprompter.ps1)
+- **Unix:** [`run_texprompter.sh`](run_texprompter.sh)
+- **Windows (PowerShell):** [`run_texprompter.ps1`](run_texprompter.ps1)
 
-Both run from `texprompter/` (repo root), prepend `PYTHONPATH`, and invoke [`scripts/texprompter_dev.py`](scripts/texprompter_dev.py).
-
-The driver (**SSH key auth only** — no password variables or `sshpass`):
-
-1. Loads **`texprompter/.env`** via `python-dotenv` (if installed).
-2. Ensures **`RZ_KENNUNG`** is set (prompts once and saves). **`RZ_SSH_HOST`** defaults to `194.95.108.135` and is written to `.env` when missing. Optional: **`RZ_SSH_LOCAL_OLLAMA_PORT`** / **`RZ_SSH_REMOTE_OLLAMA_PORT`** (default `11434`).
-3. Asks whether to run **`ssh-copy-id`** \[y/N\] (default **No**). If **No**, assumes your public key is already authorized on the jump host.
-4. Opens an SSH tunnel **`localhost:<local> → localhost:<remote>` on the server** using `ssh -N` with `BatchMode=yes`.
-5. Starts **MLflow** with `sqlite:///./mlflow.db` at **http://127.0.0.1:5000** (`--workers 1`).
-6. Asks whether to enable **live LLM / pipeline streaming** (`OLLAMA_STREAM_STDOUT=1` and `--stream-pipeline-output` for pipeline runs).
-7. Menu: **(1)** run the pipeline on a CSV chosen from the same list as evaluation seeds (paths under `data/`; industrial CSVs live in `data/versatile_producion_system` — that folder name matches the repo spelling), **(2)** run **`python -m evaluation.run_eval --with-judge`**.
-
-On exit (or Ctrl+C), SSH and MLflow child processes started by the script are terminated.
+Both scripts start the FastAPI backend, wait for the health endpoint, then launch the Streamlit application.
 
 ```bash
 cd texprompter
-./start_texprompter.sh
+./run_texprompter.sh
 ```
 
 ```powershell
 cd texprompter
-.\start_texprompter.ps1
+.\run_texprompter.ps1
 ```
 
 Direct Python (same cwd):
@@ -103,6 +91,13 @@ This project uses MLflow autologging (no hand-rolled instrumentation). After com
 
 ```bash
 pip install -r requirements-mlflow.txt
+
+# Launch both backend and frontend together
+# Unix
+./run_texprompter.sh
+
+# Windows PowerShell
+./run_texprompter.ps1
 ```
 
 The pipeline talks to a local Ollama instance through Ollama's OpenAI-compatible API (`$OLLAMA_BASE_URL/v1`). `mlflow.langchain.autolog(run_tracer_inline=True)` captures every LangGraph node, ChatOpenAI call and tool invocation as a nested span (`<agent> > LangGraph > model > tools > ...`). `run_tracer_inline=True` is **required** so the tracer context propagates back when LangGraph fans out parallel tool calls; otherwise the next model node never starts. We deliberately do **not** stack `mlflow.openai.autolog()` on top — the duplicate `Completions` layer combined with parallel tool fanout could deadlock the agent loop.

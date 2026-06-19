@@ -110,12 +110,18 @@ else:
 
     with log_container:
         with st.expander("📋 Execution Logs", expanded=True):
-            for log_entry in st.session_state.agent_logs:
-                st.text(log_entry["message"])
+            log_placeholder = st.empty()
+            def render_logs():
+                if not st.session_state.agent_logs:
+                    log_placeholder.text("No execution logs yet.")
+                else:
+                    formatted = "\n".join(entry["message"] for entry in st.session_state.agent_logs)
+                    log_placeholder.text(formatted)
+            render_logs()
 
     if st.session_state.execution_running:
         try:
-            execute_pipeline()
+            execute_pipeline(log_renderer=render_logs)
         except Exception as e:
             st.session_state.execution_running = False
             st.session_state.last_error = str(e)
@@ -264,7 +270,7 @@ if st.session_state.pipeline_state.get("scripting"):
 
                 df_vars = pd.DataFrame(list(dec_vars.items()), columns=["Variable / Resource Allocation", "Calculated Optimal Value"])
 
-                hide_zeros = st.checkbox("Hide variables with a 0 value allocation", value=False)
+                hide_zeros = st.checkbox("Hide variables with a 0 value allocation", value=True)
                 if hide_zeros:
                     df_vars = df_vars[df_vars["Calculated Optimal Value"] > 0]
 
