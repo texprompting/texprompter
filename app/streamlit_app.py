@@ -16,6 +16,8 @@ for module_name in ["app.state", "app.ui", "app.actions"]:
 from app.state import initialize_session_state, add_log
 from app.ui import display_modeling_output
 from app.actions import (
+    USE_PIPELINE_API,
+    api_health_check,
     execute_pipeline,
     approve_and_continue,
     regenerate_feedback,
@@ -28,6 +30,17 @@ st.set_page_config(page_title="TexPrompter - Workflow Optimizer", layout="wide")
 st.title("TexPrompter - Workflow Optimizer")
 
 initialize_session_state()
+
+if USE_PIPELINE_API:
+    try:
+        if not api_health_check():
+            st.warning(
+                "⚠️ FastAPI backend is not reachable. Please start the service at http://127.0.0.1:8000 or set PIPELINE_API_ENABLED=0 to use the local pipeline directly."
+            )
+    except Exception:
+        st.warning(
+            "⚠️ FastAPI backend health check failed. Please start the service at http://127.0.0.1:8000 or set PIPELINE_API_ENABLED=0 to use the local pipeline directly."
+        )
 
 # ============================================================================
 # Sidebar Configuration Interface

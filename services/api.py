@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from services.pipeline_service import PipelineService
@@ -52,15 +53,23 @@ def _write_csv_to_temp(csv_content: str, csv_filename: str | None = None) -> str
 
 
 @app.post("/pipeline/start")
-def start_pipeline(request: PipelineStartRequest) -> Dict[str, Any]:
+def start_pipeline(request: PipelineStartRequest):
     csv_path = _write_csv_to_temp(request.csv_content)
-    try:
-        updates = [update for update in service.start_pipeline(csv_path, request.initial_prompt, request.preview_rows)]
-        return {"updates": updates}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    finally:
-        Path(csv_path).unlink(missing_ok=True)
+
+    def event_stream():
+        try:
+            for update in service.start_pipeline(
+                csv_file_path=csv_path,
+                initial_prompt=request.initial_prompt,
+                preview_rows=request.preview_rows,
+            ):
+                yield json.dumps(update, default=str) + "\n"
+        except Exception as exc:
+            yield json.dumps({"error": str(exc)}) + "\n"
+        finally:
+            Path(csv_path).unlink(missing_ok=True)
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 @app.post("/pipeline/downstream")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict
 
@@ -33,6 +34,51 @@ def _post(path: str, payload: Dict[str, Any]) -> Any:
         return response.json()
     except ValueError as exc:
         raise RuntimeError(f"Invalid JSON response from Pipeline API at {url}") from exc
+
+
+def health_check() -> bool:
+    url = _service_url("/health")
+    try:
+        response = requests.get(url, timeout=API_TIMEOUT_S)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("status") == "ok"
+    except Exception:
+        return False
+
+
+def stream_start_pipeline(csv_content: str, initial_prompt: str = "", preview_rows: int = 5):
+    url = _service_url("/pipeline/start")
+    payload = {
+        "csv_content": csv_content,
+        "initial_prompt": initial_prompt,
+        "preview_rows": preview_rows,
+    }
+    with requests.post(url, json=payload, timeout=API_TIMEOUT_S, stream=True) as response:
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            detail = None
+            try:
+                error_json = response.json()
+                if isinstance(error_json, dict):
+                    detail = error_json.get("detail")
+            except ValueError:
+                detail = response.text
+            raise RuntimeError(
+                f"Pipeline API request failed ({response.status_code}) for {url}: {detail or response.text}"
+            ) from exc
+
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Unable to parse pipeline stream line: {line}") from exc
+            if isinstance(payload, dict) and payload.get("error"):
+                raise RuntimeError(payload["error"])
+            yield payload
 
 
 def start_pipeline(csv_content: str, initial_prompt: str = "", preview_rows: int = 5) -> list[Dict[str, Any]]:

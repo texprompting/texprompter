@@ -5,12 +5,13 @@ from services.pipeline_service import PipelineService
 from app.state import add_log
 from app.api_client import (
     estimate_parameters as api_estimate_parameters,
+    health_check as api_health_check,
     preprocessing as api_preprocessing,
     regenerate_feedback as api_regenerate_feedback,
     rerun_modeling as api_rerun_modeling,
     run_downstream as api_run_downstream,
     save_results as api_save_results,
-    start_pipeline as api_start_pipeline,
+    stream_start_pipeline as api_stream_start_pipeline,
     scripting as api_scripting,
 )
 
@@ -56,7 +57,7 @@ def execute_pipeline():
     add_log("Pipeline execution started...")
 
     if USE_PIPELINE_API:
-        pipeline_iterator = api_start_pipeline(
+        pipeline_iterator = api_stream_start_pipeline(
             csv_content=_csv_content(),
             initial_prompt=st.session_state.initial_prompt,
             preview_rows=5,
