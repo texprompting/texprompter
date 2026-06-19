@@ -10,18 +10,13 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 # Reload changed modules when Streamlit runs in a long-lived process.
-for module_name in ["schemas.basemodels", "orchestrator.pipeline", "agents.context_agent"]:
+for module_name in ["services.pipeline_service"]:
     if module_name in sys.modules:
         importlib.reload(sys.modules[module_name])
-# Import individual agent runners to resolve the intercept loop conflict
-from orchestrator.pipeline import (
-    stream_pipeline, 
-    run_modeling_agent,
-    run_parameter_estimation_agent,
-    run_preprocessing_agent, 
-    run_scripting_agent
-)
-from schemas.basemodels import ModellingRecommendation, ParameterEstimationRecommendation
+
+from services.pipeline_service import PipelineService
+pipeline_service = PipelineService()
+
 # Configure Streamlit
 st.set_page_config(page_title="TexPrompter - Workflow Optimizer", layout="wide")
 st.title("TexPrompter - Workflow Optimizer")
@@ -60,52 +55,6 @@ def add_log(message: str, level: str = "info"):
     timestamp = datetime.now().strftime("%H:%M:%S")
     formatted_msg = f"[{timestamp}] {message}"
     st.session_state.agent_logs.append({"message": formatted_msg, "level": level})
-def clean_for_serialization(obj):
-    """Recursively forces Pydantic objects or custom class instances into pure JSON primitives."""
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    if hasattr(obj, "model_dump"):
-        try:
-            return clean_for_serialization(obj.model_dump())
-        except Exception:
-            pass
-    if isinstance(obj, dict):
-        return {k: clean_for_serialization(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_for_serialization(item) for item in obj]
-    if isinstance(obj, tuple):
-        return tuple(clean_for_serialization(item) for item in obj)
-    if hasattr(obj, "__dict__"):
-        # Avoid traversing complex module internal structures which can lead to infinite loops
-        mod_name = getattr(type(obj), "__module__", "") or ""
-        if mod_name.startswith(('streamlit', 'pandas', 'numpy', 'pulp', 'mlflow', 'builtins')):
-            return str(obj)
-        try:
-            return {k: clean_for_serialization(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
-        except Exception:
-            return str(obj)
-    return str(obj)
-def save_pipeline_results(final_state: dict, csv_filename: str, initial_prompt: str):
-    """Save pipeline results to JSON file."""
-    output_dir = Path(__file__).parent.parent / "TestOutputs"
-    output_dir.mkdir(exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_file = output_dir / f"result_{timestamp}_{csv_filename.replace('.csv', '')}.json"
-    
-    results = {
-        "metadata": {
-            "timestamp": timestamp,
-            "csv_filename": csv_filename,
-            "initial_prompt": initial_prompt,
-        },
-        "pipeline_state": final_state,
-    }
-    
-    with open(result_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, default=str)
-    
-    return str(result_file)
 def display_modeling_output(modeling_dict: dict):
     """Format modeling output supporting dynamic variable/parameter keys and math symbols."""
     if not modeling_dict:
@@ -288,16 +237,15 @@ else:
             seen_traces = 0
             
             with st.status("Executing pipeline...", expanded=True) as status:
-                for state_update in stream_pipeline(
+                for state_update in pipeline_service.start_pipeline(
                     csv_file_path=st.session_state.csv_path,
                     preview_rows=5,
                     initial_prompt=st.session_state.initial_prompt,
                 ):
                     if isinstance(state_update, dict):
-                        clean_update = clean_for_serialization(state_update)
-                        st.session_state.pipeline_state.update(clean_update)
+                        st.session_state.pipeline_state.update(state_update)
                         
-                        traces = clean_update.get("traces", [])
+                        traces = state_update.get("traces", [])
                         if isinstance(traces, list):
                             for trace in traces[seen_traces:]:
                                 add_log(trace)
@@ -330,24 +278,15 @@ else:
                     raw_md = st.session_state.pipeline_state.get("modelling", {})
                     raw_sc = st.session_state.pipeline_state.get("input_schema_payload", {})
                     
-                    obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(raw_uc) if raw_uc else None
-                    obj_md = importlib.import_module("schemas.basemodels").ModellingRecommendation.model_validate(raw_md) if raw_md else None
-                    
-                    prep_out = run_preprocessing_agent(
+                    downstream = pipeline_service.run_downstream(
                         csv_file_path=st.session_state.csv_path,
-                        use_case=obj_uc,
-                        modelling=obj_md,
+                        use_case=raw_uc,
+                        modelling=raw_md,
                         input_schema_payload=raw_sc,
+                        preview_rows=5,
                     )
-                    st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(prep_out)
-                    
-                    script_out = run_scripting_agent(
-                        csv_file_path=st.session_state.csv_path,
-                        modelling=obj_md,
-                        preprocessing=importlib.import_module("schemas.basemodels").PreprocessingRecommendation.model_validate(clean_for_serialization(prep_out)),
-                        input_schema_payload=raw_sc,
-                    )
-                    st.session_state.pipeline_state["scripting"] = clean_for_serialization(script_out)
+                    st.session_state.pipeline_state["preprocessing"] = downstream.get("preprocessing")
+                    st.session_state.pipeline_state["scripting"] = downstream.get("scripting")
             
             st.session_state.execution_running = False
             st.session_state.execution_complete = True
@@ -400,32 +339,19 @@ else:
                 if st.button("✅ Approve Everything & Continue", use_container_width=True):
                     try:
                         with st.spinner("⏳ Compiling data preprocessing mappers and runtime scripts..."):
-                            c_use_case = clean_for_serialization(st.session_state.pipeline_state.get("use_case", {}))
-                            c_modeling = clean_for_serialization(st.session_state.pipeline_state.get("modelling", {}))
-                            c_schema = clean_for_serialization(st.session_state.pipeline_state.get("input_schema_payload", {}))
+                            c_use_case = st.session_state.pipeline_state.get("use_case", {})
+                            c_modeling = st.session_state.pipeline_state.get("modelling", {})
+                            c_schema = st.session_state.pipeline_state.get("input_schema_payload", {})
                             
-                            obj_uc = importlib.import_module("schemas.basemodels").UseCaseRecommendation.model_validate(c_use_case) if c_use_case else None
-                            obj_md = importlib.import_module("schemas.basemodels").ModellingRecommendation.model_validate(c_modeling) if c_modeling else None
-                            
-                            preprocessing_output = run_preprocessing_agent(
+                            downstream = pipeline_service.run_downstream(
                                 csv_file_path=st.session_state.csv_path,
-                                use_case=obj_uc,
-                                modelling=obj_md,
+                                use_case=c_use_case,
+                                modelling=c_modeling,
                                 input_schema_payload=c_schema,
-                                preview_rows=5
+                                preview_rows=5,
                             )
-                            st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(preprocessing_output)
-                            
-                            obj_prep = importlib.import_module("schemas.basemodels").PreprocessingRecommendation.model_validate(clean_for_serialization(preprocessing_output))
-                            
-                            scripting_output = run_scripting_agent(
-                                csv_file_path=st.session_state.csv_path,
-                                modelling=obj_md,
-                                preprocessing=obj_prep,
-                                input_schema_payload=c_schema,
-                                preview_rows=5
-                            )
-                            st.session_state.pipeline_state["scripting"] = clean_for_serialization(scripting_output)
+                            st.session_state.pipeline_state["preprocessing"] = downstream.get("preprocessing")
+                            st.session_state.pipeline_state["scripting"] = downstream.get("scripting")
                             
                             st.session_state.show_modeling_intercept = False
                             st.session_state.execution_complete = True
@@ -468,38 +394,17 @@ else:
                         else:
                             try:
                                 with st.spinner("⏳ Regenerating configuration structures via feedback loop..."):
-                                    c_use_case = clean_for_serialization(st.session_state.pipeline_state.get("use_case", {}))
-                                    c_schema = clean_for_serialization(st.session_state.pipeline_state.get("input_schema_payload", {}))
+                                    c_use_case = st.session_state.pipeline_state.get("use_case", {})
+                                    c_schema = st.session_state.pipeline_state.get("input_schema_payload", {})
                                     
-                                    basemodels = importlib.import_module("schemas.basemodels")
-                                    
-                                    obj_uc = basemodels.UseCaseRecommendation.model_validate(c_use_case) if c_use_case else None
-                                    if obj_uc:
-                                        assumptions_list = list(obj_uc.assumptions or [])
-                                        assumptions_list.append(f"User feedback: {feedback_text}")
-                                        obj_uc = obj_uc.model_copy(update={"assumptions": assumptions_list})
-                                        st.session_state.pipeline_state["use_case"] = clean_for_serialization(obj_uc)
-                                    
-                                    m_res = run_modeling_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, preview_rows=5)
-                                    obj_md = basemodels.ModellingRecommendation.model_validate(clean_for_serialization(m_res))
-                                    
-                                    pe_res = run_parameter_estimation_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, modelling=obj_md, preview_rows=5)
-                                    obj_pe = basemodels.ParameterEstimationRecommendation.model_validate(clean_for_serialization(pe_res))
-                                    
-                                    obj_md = obj_md.model_copy(update={
-                                        "constraint_functions": obj_pe.updated_constraint_functions,
-                                        "objective_function": obj_pe.updated_objective_function
-                                    })
-                                    st.session_state.pipeline_state["modelling"] = clean_for_serialization(obj_md)
-                                    st.session_state.pipeline_state["parameter_estimation"] = clean_for_serialization(obj_pe)
-                                    
-                                    p_res = run_preprocessing_agent(csv_file_path=st.session_state.csv_path, use_case=obj_uc, modelling=obj_md, input_schema_payload=c_schema, preview_rows=5)
-                                    st.session_state.pipeline_state["preprocessing"] = clean_for_serialization(p_res)
-                                    
-                                    obj_prep = basemodels.PreprocessingRecommendation.model_validate(clean_for_serialization(p_res))
-                                    
-                                    s_res = run_scripting_agent(csv_file_path=st.session_state.csv_path, modelling=obj_md, preprocessing=obj_prep, input_schema_payload=c_schema, preview_rows=5)
-                                    st.session_state.pipeline_state["scripting"] = clean_for_serialization(s_res)
+                                    feedback_result = pipeline_service.regenerate_from_feedback(
+                                        csv_file_path=st.session_state.csv_path,
+                                        use_case=c_use_case,
+                                        input_schema_payload=c_schema,
+                                        feedback=feedback_text,
+                                        preview_rows=5,
+                                    )
+                                    st.session_state.pipeline_state.update(feedback_result)
                                     
                                     st.session_state.modeling_edit_mode = False
                                     st.session_state.show_modeling_intercept = False
@@ -522,7 +427,7 @@ else:
         st.header("🎉 Run Complete!")
         
         if not st.session_state.result_file:
-            result_file = save_pipeline_results(
+            result_file = pipeline_service.save_results(
                 st.session_state.pipeline_state,
                 st.session_state.csv_filename,
                 st.session_state.initial_prompt
