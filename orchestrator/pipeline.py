@@ -25,8 +25,10 @@ from schemas.basemodels import (
     AgentError,
     AgentExecutionMetadata,
     ModellingRecommendation,
+    ParameterEstimationRecommendation,
     PipelineState,
     PreprocessingRecommendation,
+    ResultsInterpretationRecommendation,
     ScriptingRecommendation,
     StallReason,
     UseCaseRecommendation,
@@ -45,8 +47,10 @@ class PipelineStateDict(TypedDict, total=False):
     input_schema_payload: dict[str, Any]
     use_case: dict[str, Any] | None
     modelling: dict[str, Any] | None
+    parameter_estimation: dict[str, Any] | None
     preprocessing: dict[str, Any] | None
     scripting: dict[str, Any] | None
+    results_interpretation: dict[str, Any] | None
     errors: list[dict[str, Any]]
     traces: list[str]
     llm_artifacts: dict[str, Any]
@@ -413,6 +417,37 @@ def run_modeling_agent(
     return recommendation
 
 
+def run_parameter_estimation_agent(
+    csv_file_path: str,
+    use_case: UseCaseRecommendation | None,
+    modelling: ModellingRecommendation | None,
+    preview_rows: int = 5,
+    return_debug: bool = False,
+) -> ParameterEstimationRecommendation | dict[str, Any]:
+    resolved_csv_path = _resolve_csv_path(csv_file_path)
+    if not resolved_csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
+
+    from agents.Parameter_Estimator_Agent import run_parameter_estimator_agent
+
+    raw_payload = run_parameter_estimator_agent(
+        csv_file_path=str(resolved_csv_path),
+        use_case=use_case,
+        modelling=modelling,
+        preview_rows=preview_rows,
+        return_debug=return_debug,
+    )
+    raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_payload)
+    recommendation = ParameterEstimationRecommendation.model_validate(raw_result)
+    if return_debug:
+        return {
+            "result": recommendation.model_dump(),
+            "tool_trace": tool_trace,
+            "debug": debug_payload,
+        }
+    return recommendation
+
+
 def run_preprocessing_agent(
     csv_file_path: str,
     use_case: UseCaseRecommendation | None,
@@ -457,6 +492,11 @@ def run_preprocessing_agent(
     return recommendation
 
 
+from typing import Any
+import sys
+import traceback
+from agents.Pulp_Coding_Agent import run_pulp_coding_agent
+
 def run_scripting_agent(
     csv_file_path: str,
     modelling: ModellingRecommendation | None,
@@ -469,8 +509,6 @@ def run_scripting_agent(
     if not resolved_csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
 
-    from agents.Pulp_Coding_Agent import run_pulp_coding_agent
-
     raw_payload = run_pulp_coding_agent(
         csv_file_path=str(resolved_csv_path),
         modelling=modelling,
@@ -480,24 +518,170 @@ def run_scripting_agent(
         return_debug=return_debug,
     )
     raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_payload)
+
     if not isinstance(raw_result, dict):
         raise ValueError("Pulp_Coding_Agent did not return a valid payload.")
 
-    if "output_schema" not in raw_result:
-        raw_result = {
-            "code": str(raw_result.get("code", "")),
-            "output_schema": {
-                "solution_status": "str",
-                "objective_value": "float",
-                "decision_variables": "dict[str, float]",
-                "solver_message": "str",
-            },
-            "successful_implementation": bool(raw_result.get("successful_implementation", False)),
-            "missing_info": [],
-            "additional_info": [],
-        }
+    # --- NEW: DYNAMIC CODE EXECUTION SANDBOX ---
+    generated_code = raw_result.get("code", "")
+    execution_success = False
+    additional_info = list(raw_result.get("additional_info", []))
+    
+    # Defaults in case execution completely crashes
+    actual_status = "Execution Failed"
+    actual_objective = None
+    actual_variables = {}
+    actual_message = ""
+
+    if generated_code:
+        try:
+            import pandas as pd
+            real_read_csv = pd.read_csv
+            def mock_read_csv(*args, **kwargs):
+                # Always load the actual pipeline CSV path, overriding hardcoded temp paths
+                return real_read_csv(str(resolved_csv_path), *args, **kwargs)
+
+            # Create an isolated local execution scope
+            local_scope: dict[str, Any] = {}
+            
+            # Execute the generated code with read_csv mocked
+            try:
+                pd.read_csv = mock_read_csv
+                exec(generated_code, local_scope)
+            finally:
+                pd.read_csv = real_read_csv
+
+            # Locate and run the target function if present
+            optimization_output = None
+            if "solve_model" in local_scope and callable(local_scope["solve_model"]):
+                import inspect
+                func = local_scope["solve_model"]
+                sig = inspect.signature(func)
+                if len(sig.parameters) > 0:
+                    optimization_output = func(str(resolved_csv_path))
+                else:
+                    optimization_output = func()
+
+            # Initialize extracted values
+            temp_status = None
+            temp_objective = None
+            temp_variables = {}
+            temp_message = ""
+
+            if isinstance(optimization_output, dict):
+                temp_status = optimization_output.get("solution_status")
+                temp_objective = optimization_output.get("objective_value")
+                temp_variables = optimization_output.get("decision_variables")
+                temp_message = optimization_output.get("solver_message")
+                execution_success = True
+
+            # Fallback extraction from local_scope variables (for flat scripts or simple returns)
+            if not execution_success or temp_status is None:
+                # 1. Try to find a dict called 'output'
+                output_dict = local_scope.get("output")
+                if isinstance(output_dict, dict):
+                    temp_status = output_dict.get("solution_status") or temp_status
+                    temp_objective = output_dict.get("objective_value") if output_dict.get("objective_value") is not None else temp_objective
+                    temp_variables = output_dict.get("decision_variables") or temp_variables
+                    temp_message = output_dict.get("solver_message") or temp_message
+                    execution_success = True
+
+                # 2. Try to find any pulp.LpProblem object
+                pulp_problem = None
+                for val in local_scope.values():
+                    if type(val).__name__ == "LpProblem":
+                        pulp_problem = val
+                        break
+
+                if pulp_problem is not None:
+                    import pulp
+                    status_code = pulp_problem.status
+                    if status_code in pulp.LpStatus:
+                        temp_status = pulp.LpStatus[status_code]
+                    else:
+                        temp_status = "Optimal" if status_code == 1 else "Not Solved"
+                    
+                    temp_objective = pulp.value(pulp_problem.objective)
+                    
+                    variables_dict = {}
+                    for var in pulp_problem.variables():
+                        name = var.name
+                        if name.startswith("x_"):
+                            name = name[2:]
+                        variables_dict[name] = var.varValue
+                    temp_variables = variables_dict or temp_variables
+                    temp_message = f"Extracted from Pulp Problem: {temp_status}"
+                    execution_success = True
+
+                # 3. Try individual variables from local_scope
+                if not temp_status:
+                    for k in ["solution_status", "status"]:
+                        if k in local_scope:
+                            val = local_scope[k]
+                            if isinstance(val, int):
+                                import pulp
+                                temp_status = pulp.LpStatus.get(val, str(val))
+                            else:
+                                temp_status = str(val)
+                            break
+                if temp_objective is None:
+                    for k in ["objective_value", "obj_val", "objective"]:
+                        if k in local_scope and isinstance(local_scope[k], (int, float)):
+                            temp_objective = float(local_scope[k])
+                            break
+                if not temp_variables:
+                    for k in ["decision_variables", "x_values", "variables"]:
+                        if k in local_scope and isinstance(local_scope[k], dict):
+                            temp_variables = local_scope[k]
+                            break
+                if not temp_message:
+                    for k in ["solver_message", "message"]:
+                        if k in local_scope:
+                            temp_message = str(local_scope[k])
+                            break
+
+                if temp_status or temp_objective is not None or temp_variables:
+                    execution_success = True
+
+            # Map the temporary variables to actual values with fallbacks
+            actual_status = str(temp_status) if temp_status else "Optimal"
+            actual_objective = float(temp_objective) if temp_objective is not None else None
+            actual_variables = temp_variables if isinstance(temp_variables, dict) else {}
+            actual_message = str(temp_message) if temp_message else f"Solver status: {actual_status}"
+
+        except Exception as e:
+            # Catch compilation or runtime evaluation errors safely without crashing the orchestrator
+            exc_type, exc_value, _ = sys.exc_info()
+            error_msg = f"Runtime optimization failure: {exc_type.__name__ if exc_type else 'Exception'}: {exc_value}"
+            additional_info.append(error_msg)
+            actual_message = error_msg
+    else:
+        additional_info.append("Error: No code string was provided by the coding agent.")
+
+    # --- RESTRUCTURE PAYLOAD WITH REAL MATH RESULTS ---
+    raw_result = {
+        "code": generated_code,
+        "solution_status": actual_status,
+        "objective_value": actual_objective,
+        "decision_variables": actual_variables,
+        "solver_message": actual_message,
+        "output_schema": {
+            "solution_status": actual_status,
+            "objective_value": actual_objective,
+            "decision_variables": actual_variables,
+            "solver_message": actual_message,
+        },
+        # Consider it fully successful only if the agent made it and the solver successfully hit an optimal solution
+        "successful_implementation": execution_success and (actual_status.lower() in ["optimal", "executed cleanly"]),
+        "missing_info": raw_result.get("missing_info", []),
+        "additional_info": additional_info,
+    }
+    print("----------------------------Script results---------------------------------")
+    print(raw_result)
 
     recommendation = ScriptingRecommendation.model_validate(raw_result)
+
+    print(recommendation)
 
     if return_debug:
         return {
@@ -506,6 +690,37 @@ def run_scripting_agent(
             "debug": debug_payload,
         }
     return recommendation
+
+
+def run_results_interpretation_agent(
+    use_case: UseCaseRecommendation | None,
+    modelling: ModellingRecommendation | None,
+    scripting: ScriptingRecommendation | None,
+    return_debug: bool = False,
+) -> ResultsInterpretationRecommendation | dict[str, Any]:
+    from agents.Results_Interpreter_Agent import run_results_interpreter_agent
+
+    raw_payload = run_results_interpreter_agent(
+        use_case=use_case,
+        modelling=modelling,
+        scripting=scripting,
+        return_debug=return_debug,
+    )
+    raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_payload)
+
+    if not isinstance(raw_result, dict):
+        raise ValueError("Results_Interpreter_Agent did not return a valid payload.")
+
+    recommendation = ResultsInterpretationRecommendation.model_validate(raw_result)
+
+    if return_debug:
+        return {
+            "result": recommendation.model_dump(),
+            "tool_trace": tool_trace,
+            "debug": debug_payload,
+        }
+    return recommendation
+
 
 
 def _is_stage_skipped(state: PipelineState, stage_name: str) -> bool:
@@ -715,6 +930,65 @@ def modeling_node(state: PipelineStateDict) -> PipelineStateDict:
     return current_state.model_dump()
 
 
+def parameter_estimation_node(state: PipelineStateDict) -> PipelineStateDict:
+    current_state = PipelineState.model_validate(state)
+    if current_state.status == "error":
+        return current_state.model_dump()
+
+    if _is_stage_skipped(current_state, "parameter_estimation"):
+        _append_trace(current_state, "parameter_estimation:skipped")
+        return current_state.model_dump()
+
+    started_at = time.time()
+    _emit_progress("parameter_estimation:start")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_parameter_estimation_agent,
+            csv_file_path=current_state.csv_file_path,
+            use_case=current_state.use_case,
+            modelling=current_state.modelling,
+            preview_rows=current_state.preview_rows,
+        )
+        current_state.parameter_estimation = ParameterEstimationRecommendation.model_validate(payload)
+        
+        # Update modelling in-place with estimated values so downstream nodes consume concrete equations
+        if current_state.modelling is not None:
+            current_state.modelling = current_state.modelling.model_copy(
+                update={
+                    "constraint_functions": current_state.parameter_estimation.updated_constraint_functions,
+                    "objective_function": current_state.parameter_estimation.updated_objective_function,
+                }
+            )
+
+        _record_prompt_lineage(current_state, stage_name="parameter_estimation", debug_payload=debug_payload)
+        _append_trace(current_state, "parameter_estimation:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="parameter_estimation_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("parameter_estimation:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("parameter_estimation_agent")
+        _set_error(current_state, "parameter_estimation_agent", error)
+        _append_trace(current_state, "parameter_estimation:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="parameter_estimation_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error)],
+        )
+        _emit_progress(f"parameter_estimation:error - {error}")
+
+    return current_state.model_dump()
+
+
 def preprocessing_node(state: PipelineStateDict) -> PipelineStateDict:
     current_state = PipelineState.model_validate(state)
     if current_state.status == "error":
@@ -836,6 +1110,59 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
     return current_state.model_dump()
 
 
+def results_interpretation_node(state: PipelineStateDict) -> PipelineStateDict:
+    current_state = PipelineState.model_validate(state)
+    if current_state.status == "error":
+        return current_state.model_dump()
+
+    if _is_stage_skipped(current_state, "results_interpretation"):
+        _append_trace(current_state, "results_interpretation:skipped")
+        return current_state.model_dump()
+
+    started_at = time.time()
+    _emit_progress("results_interpretation:start")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_results_interpretation_agent,
+            use_case=current_state.use_case,
+            modelling=current_state.modelling,
+            scripting=current_state.scripting,
+        )
+        current_state.results_interpretation = ResultsInterpretationRecommendation.model_validate(payload)
+        _record_prompt_lineage(current_state, stage_name="results_interpretation", debug_payload=debug_payload)
+        _append_trace(current_state, "results_interpretation:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="results_interpretation_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("results_interpretation:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("results_interpretation_agent")
+        exception_tool_trace, debug_payload = _extract_exception_debug(error)
+        if exception_tool_trace:
+            tool_trace = exception_tool_trace
+        _record_prompt_lineage(current_state, stage_name="results_interpretation", debug_payload=debug_payload)
+        _set_error(current_state, "results_interpretation_agent", error)
+        _append_trace(current_state, "results_interpretation:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="results_interpretation_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error), *_debug_notes(debug_payload)],
+        )
+        _emit_progress(f"results_interpretation:error - {error}")
+
+    return current_state.model_dump()
+
+
+
 def _status_router(state: PipelineStateDict) -> str:
     return "stop" if state.get("status") == "error" else "continue"
 
@@ -883,8 +1210,10 @@ def build_pipeline_graph() -> Any:
     builder.add_node("initialize", initialize_node)
     builder.add_node("use_case", use_case_node)
     builder.add_node("modeling", modeling_node)
+    builder.add_node("parameter_estimation", parameter_estimation_node)
     builder.add_node("preprocessing", preprocessing_node)
     builder.add_node("scripting", scripting_node)
+    builder.add_node("results_interpretation", results_interpretation_node)
 
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
@@ -907,6 +1236,14 @@ def build_pipeline_graph() -> Any:
         "modeling",
         _status_router,
         {
+            "continue": "parameter_estimation",
+            "stop": END,
+        },
+    )
+    builder.add_conditional_edges(
+        "parameter_estimation",
+        _status_router,
+        {
             "continue": "preprocessing",
             "stop": END,
         },
@@ -919,7 +1256,15 @@ def build_pipeline_graph() -> Any:
             "stop": END,
         },
     )
-    builder.add_edge("scripting", END)
+    builder.add_conditional_edges(
+        "scripting",
+        _status_router,
+        {
+            "continue": "results_interpretation",
+            "stop": END,
+        },
+    )
+    builder.add_edge("results_interpretation", END)
 
     return builder.compile()
 
@@ -930,8 +1275,10 @@ def run_agent_node(agent_name: str, state: PipelineStateDict) -> PipelineState:
         "initialize": initialize_node,
         "use_case": use_case_node,
         "modeling": modeling_node,
+        "parameter_estimation": parameter_estimation_node,
         "preprocessing": preprocessing_node,
         "scripting": scripting_node,
+        "results_interpretation": results_interpretation_node,
     }
     if agent_name not in nodes:
         raise ValueError(f"Unknown agent node '{agent_name}'. Expected one of: {', '.join(nodes)}")
@@ -1090,8 +1437,8 @@ def run_downstream_agents(
     modelling: Any | None,
     input_schema_payload: dict[str, Any] | None,
     preview_rows: int = 5,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run preprocessing and scripting agents from an existing pipeline state."""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Run preprocessing, scripting and results interpretation agents from an existing pipeline state."""
     _setup_mlflow()
     resolved_use_case = _normalize_use_case(use_case)
     resolved_modelling = _normalize_modelling(modelling)
@@ -1130,6 +1477,25 @@ def run_downstream_agents(
             }
         )
 
+        pe_result = run_parameter_estimation_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            modelling=resolved_modelling,
+            preview_rows=preview_rows,
+        )
+        if isinstance(pe_result, dict) and "result" in pe_result:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result["result"])
+        else:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result)
+            
+        if resolved_modelling is not None:
+            resolved_modelling = resolved_modelling.model_copy(
+                update={
+                    "constraint_functions": pe_rec.updated_constraint_functions,
+                    "objective_function": pe_rec.updated_objective_function,
+                }
+            )
+
         preprocessing_result = run_preprocessing_agent(
             csv_file_path=csv_file_path,
             use_case=resolved_use_case,
@@ -1144,9 +1510,20 @@ def run_downstream_agents(
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
         )
+        results_interpretation_result = run_results_interpretation_agent(
+            use_case=resolved_use_case,
+            modelling=resolved_modelling,
+            scripting=scripting_result if isinstance(scripting_result, ScriptingRecommendation) else ScriptingRecommendation.model_validate(scripting_result),
+        )
 
         mlflow_status = "FINISHED"
-        return preprocessing_result.model_dump(), scripting_result.model_dump()
+        return (
+            resolved_modelling.model_dump(),
+            pe_rec.model_dump(),
+            preprocessing_result.model_dump(),
+            scripting_result.model_dump(),
+            results_interpretation_result.model_dump(),
+        )
     finally:
         if mlflow_run_started:
             mlflow.end_run(status=mlflow_status)
@@ -1159,7 +1536,7 @@ def rerun_modeling_with_feedback(
     current_modelling: Any | None,
     input_schema_payload: dict[str, Any] | None,
     preview_rows: int = 5,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Rerun modeling and downstream agents based on user feedback."""
     _setup_mlflow()
     resolved_use_case = _validate_and_extend_use_case_feedback(use_case, feedback)
@@ -1206,26 +1583,56 @@ def rerun_modeling_with_feedback(
             use_case=resolved_use_case,
             preview_rows=preview_rows,
         )
+        if isinstance(modelling_result, dict) and "result" in modelling_result:
+            modelling_rec = ModellingRecommendation.model_validate(modelling_result["result"])
+        else:
+            modelling_rec = ModellingRecommendation.model_validate(modelling_result)
+
+        pe_result = run_parameter_estimation_agent(
+            csv_file_path=csv_file_path,
+            use_case=resolved_use_case,
+            modelling=modelling_rec,
+            preview_rows=preview_rows,
+        )
+        if isinstance(pe_result, dict) and "result" in pe_result:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result["result"])
+        else:
+            pe_rec = ParameterEstimationRecommendation.model_validate(pe_result)
+            
+        updated_modelling = modelling_rec.model_copy(
+            update={
+                "constraint_functions": pe_rec.updated_constraint_functions,
+                "objective_function": pe_rec.updated_objective_function,
+            }
+        )
+
         preprocessing_result = run_preprocessing_agent(
             csv_file_path=csv_file_path,
             use_case=resolved_use_case,
-            modelling=modelling_result,
+            modelling=updated_modelling,
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
         )
         scripting_result = run_scripting_agent(
             csv_file_path=csv_file_path,
-            modelling=modelling_result,
+            modelling=updated_modelling,
             preprocessing=preprocessing_result,
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
         )
+        results_interpretation_result = run_results_interpretation_agent(
+            use_case=resolved_use_case,
+            modelling=updated_modelling,
+            scripting=scripting_result if isinstance(scripting_result, ScriptingRecommendation) else ScriptingRecommendation.model_validate(scripting_result),
+        )
 
         mlflow_status = "FINISHED"
         return (
-            modelling_result.model_dump(),
+            updated_modelling.model_dump(),
+            pe_rec.model_dump(),
             preprocessing_result.model_dump(),
             scripting_result.model_dump(),
+            results_interpretation_result.model_dump(),
         )
     finally:
         if mlflow_run_started:

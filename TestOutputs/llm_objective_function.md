@@ -1,1 +1,1 @@
-\max \sum_{i \in I} (p_i - c_i) x_i
+\\sum_{t \\in T} (E_h \\cdot h_t + E_f \\cdot f_t + E_p \\cdot p_t)

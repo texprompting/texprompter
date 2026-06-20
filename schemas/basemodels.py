@@ -209,14 +209,11 @@ class ModellingRecommendation(BaseModel):
     )
     constraint_functions: list[str] = Field(
         default_factory=list,
-        description="List of constraints in pseudo-LaTeX.",
+        description="List of constraints in pseudo-LaTeX. ALWAYS use abstract parameter symbols for constraint limits, capacities, bounds, and other fixed data points.",
     )
     explanation_of_ILP: list[str] = Field(
         default_factory=list,
         description="Natural language explanations for objective and constraints.",
-    )
-    readable_documentation: str = Field(
-        description="Single markdown block with complete model documentation."
     )
 
     @field_validator("minimizing_problem", mode="before")
@@ -233,6 +230,64 @@ class ModellingRecommendation(BaseModel):
     @classmethod
     def _coerce_nested_list_fields(cls, value: Any) -> Any:
         return _coerce_nested_model_list(value)
+
+
+class ParameterValue(BaseModel):
+    """A single parameter's estimated numerical value."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    symbol: str = Field(description="Parameter symbol, e.g. 'C_A' or 'S_p'.")
+    value: float = Field(description="Estimated numerical value for this parameter.")
+
+
+class ParameterRationale(BaseModel):
+    """Rationale for a single parameter's estimated value."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    symbol: str = Field(description="Parameter symbol, e.g. 'C_A' or 'S_p'.")
+    rationale: str = Field(description="Explanation of how the value was derived.")
+
+
+class ParameterEstimationRecommendation(BaseModel):
+    """Output contract for the parameter estimation agent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    parameter_values: list[ParameterValue] = Field(
+        default_factory=list,
+        description="Estimated values for each parameter symbol. Each entry has a 'symbol' and 'value'.",
+    )
+    parameter_rationales: list[ParameterRationale] = Field(
+        default_factory=list,
+        description="Reasoning/rationale for each parameter. Each entry has a 'symbol' and 'rationale'.",
+    )
+    updated_constraint_functions: list[str] = Field(
+        default_factory=list,
+        description="List of constraints in LaTeX with abstract parameters replaced by their estimated numerical values.",
+    )
+    updated_objective_function: str = Field(
+        description="MILP objective function with parameters replaced by their estimated values."
+    )
+
+    @field_validator("parameter_values", "parameter_rationales", mode="before")
+    @classmethod
+    def _coerce_nested_list_fields(cls, value: Any) -> Any:
+        return _coerce_nested_model_list(value)
+
+    @field_validator("updated_constraint_functions", mode="before")
+    @classmethod
+    def _coerce_str_list_fields(cls, value: Any) -> Any:
+        return _coerce_json_collection(value)
+
+    def values_as_dict(self) -> dict[str, float]:
+        """Convert parameter_values list back to a {symbol: value} dict for downstream consumers."""
+        return {pv.symbol: pv.value for pv in self.parameter_values}
+
+    def rationales_as_dict(self) -> dict[str, str]:
+        """Convert parameter_rationales list back to a {symbol: rationale} dict for downstream consumers."""
+        return {pr.symbol: pr.rationale for pr in self.parameter_rationales}
 
 
 class PreprocessingRecommendation(BaseModel):
@@ -289,6 +344,24 @@ class ScriptingRecommendation(BaseModel):
         description="Extra diagnostics, warnings, or simplifications.",
     )
 
+    # Execution result fields — populated after sandbox execution, not by the LLM.
+    solution_status: str = Field(
+        default="",
+        description="Solver status from execution, e.g. 'Optimal'.",
+    )
+    objective_value: float | None = Field(
+        default=None,
+        description="Objective value from solver execution.",
+    )
+    decision_variables: dict[str, float] = Field(
+        default_factory=dict,
+        description="Decision variable values from solver execution.",
+    )
+    solver_message: str = Field(
+        default="",
+        description="Solver diagnostic message.",
+    )
+
     @field_validator("successful_implementation", mode="before")
     @classmethod
     def _coerce_bool_field(cls, value: Any) -> Any:
@@ -298,10 +371,55 @@ class ScriptingRecommendation(BaseModel):
         "output_schema",
         "missing_info",
         "additional_info",
+        "decision_variables",
         mode="before",
     )
     @classmethod
     def _coerce_collection_fields(cls, value: Any) -> Any:
+        return _coerce_json_collection(value)
+
+
+class ResultsInterpretationRecommendation(BaseModel):
+    """Output contract for the results interpretation agent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    summary: str = Field(
+        description="Executive summary (2-3 sentences) of the optimization outcome."
+    )
+    objective_interpretation: str = Field(
+        description="What the objective value means in concrete business terms."
+    )
+    key_decisions: list[str] = Field(
+        default_factory=list,
+        description="Bullet points of the most important decision variable allocations.",
+    )
+    actionable_recommendations: list[str] = Field(
+        default_factory=list,
+        description="Concrete steps to implement the optimization results.",
+    )
+    constraints_analysis: str = Field(
+        default="",
+        description="Which constraints are binding/active and their business implications.",
+    )
+    sensitivity_notes: list[str] = Field(
+        default_factory=list,
+        description="Notes on which inputs the solution is most sensitive to.",
+    )
+    caveats: list[str] = Field(
+        default_factory=list,
+        description="Limitations, assumptions, or areas of uncertainty.",
+    )
+
+    @field_validator(
+        "key_decisions",
+        "actionable_recommendations",
+        "sensitivity_notes",
+        "caveats",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_list_fields(cls, value: Any) -> Any:
         return _coerce_json_collection(value)
 
 
@@ -353,8 +471,10 @@ class PipelineState(BaseModel):
     input_schema_payload: dict[str, Any] = Field(default_factory=dict)
     use_case: UseCaseRecommendation | None = None
     modelling: ModellingRecommendation | None = None
+    parameter_estimation: ParameterEstimationRecommendation | None = None
     preprocessing: PreprocessingRecommendation | None = None
     scripting: ScriptingRecommendation | None = None
+    results_interpretation: ResultsInterpretationRecommendation | None = None
     errors: list[AgentError] = Field(default_factory=list)
     traces: list[str] = Field(default_factory=list)
     llm_artifacts: dict[str, Any] = Field(default_factory=dict)

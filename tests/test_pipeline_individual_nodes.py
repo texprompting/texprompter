@@ -5,7 +5,9 @@ from typing import Any
 from orchestrator.pipeline import initialize_node, run_agent_node
 from schemas.basemodels import (
     ModellingRecommendation,
+    ParameterEstimationRecommendation,
     PreprocessingRecommendation,
+    ResultsInterpretationRecommendation,
     ScriptingRecommendation,
     UseCaseRecommendation,
 )
@@ -147,6 +149,60 @@ def test_run_agent_node_modeling_receives_upstream_use_case(monkeypatch: Any) ->
     assert result_state.modelling.objective_function == "max z"
     assert captured.get("use_case") is not None
     assert result_state.traces[-1] == "modeling:ok"
+
+
+def test_run_agent_node_parameter_estimation_consumes_state(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_parameter_estimation_agent(**kwargs: Any) -> ParameterEstimationRecommendation:
+        captured.update(kwargs)
+        return ParameterEstimationRecommendation(
+            parameter_values=[{"symbol": "C_A", "value": 500.0}],
+            parameter_rationales=[{"symbol": "C_A", "rationale": "estimated limit"}],
+            updated_constraint_functions=["x <= 500"],
+            updated_objective_function="max z",
+            updated_readable_documentation="# Model Concrete",
+        )
+
+    monkeypatch.setattr("orchestrator.pipeline.run_parameter_estimation_agent", fake_run_parameter_estimation_agent)
+
+    result_state = run_agent_node(
+        "parameter_estimation",
+        {
+            "csv_file_path": "data/optimization_pipeline_test_easy.csv",
+            "preview_rows": 5,
+            "status": "ok",
+            "errors": [],
+            "traces": [],
+            "use_case": {
+                "use_case_name": "Production Planning",
+                "business_goal": "Maximize profit",
+                "objective_direction": "max",
+                "objective_variable": "profit",
+                "decision_variables": ["x_i"],
+                "required_columns": ["Product_ID"],
+                "constraints_to_consider": [],
+                "assumptions": [],
+                "rationale": "Test",
+            },
+            "modelling": {
+                "col_names_used": ["Product_ID"],
+                "parameters": [],
+                "variables": [],
+                "minimizing_problem": False,
+                "objective_function": "max z",
+                "constraint_functions": ["x <= C_A"],
+                "explanation_of_ILP": ["Test"],
+                "readable_documentation": "# Model",
+            },
+        },
+    )
+
+    assert result_state.parameter_estimation is not None
+    assert result_state.parameter_estimation.parameter_values[0].symbol == "C_A"
+    assert result_state.parameter_estimation.parameter_values[0].value == 500.0
+    assert result_state.modelling.constraint_functions == ["x <= 500"]
+    assert result_state.traces[-1] == "parameter_estimation:ok"
 
 
 def test_run_agent_node_preprocessing_consumes_state(monkeypatch: Any) -> None:
@@ -308,3 +364,68 @@ def test_run_agent_node_scripting_preserves_exception_debug(monkeypatch: Any) ->
     notes = result_state.execution_metadata[-1].notes
     assert any("debug_milestones=csv_resolved,model_request_start,error" in note for note in notes)
     assert any("debug_model=model=qwen3.6:latest" in note for note in notes)
+
+
+def test_run_agent_node_results_interpretation_contract(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_results_interpretation_agent(**kwargs: Any) -> ResultsInterpretationRecommendation:
+        captured.update(kwargs)
+        return ResultsInterpretationRecommendation(
+            summary="Executive Summary",
+            objective_interpretation="Objective meaning",
+            key_decisions=["Decision A"],
+            actionable_recommendations=["Do X"],
+            constraints_analysis="Constraints binding",
+            sensitivity_notes=["Notes"],
+            caveats=["Caveats"],
+        )
+
+    monkeypatch.setattr("orchestrator.pipeline.run_results_interpretation_agent", fake_run_results_interpretation_agent)
+
+    result_state = run_agent_node(
+        "results_interpretation",
+        {
+            "csv_file_path": "data/optimization_pipeline_test_easy.csv",
+            "preview_rows": 5,
+            "status": "ok",
+            "errors": [],
+            "traces": [],
+            "use_case": {
+                "use_case_name": "Production Planning",
+                "business_goal": "Maximize profit",
+                "objective_direction": "max",
+                "objective_variable": "profit",
+                "decision_variables": ["x_i"],
+                "required_columns": ["Product_ID"],
+                "constraints_to_consider": [],
+                "assumptions": [],
+                "rationale": "Test",
+            },
+            "modelling": {
+                "col_names_used": ["Product_ID"],
+                "parameters": [],
+                "variables": [],
+                "minimizing_problem": False,
+                "objective_function": "max z",
+                "constraint_functions": ["x <= 10"],
+                "explanation_of_ILP": ["Test"],
+                "readable_documentation": "# Model",
+            },
+            "scripting": {
+                "code": "print('ok')",
+                "output_schema": {"objective_value": "float"},
+                "successful_implementation": True,
+                "missing_info": [],
+                "additional_info": [],
+                "solution_status": "Optimal",
+                "objective_value": 100.0,
+                "decision_variables": {"x": 10.0},
+                "solver_message": "Optimal",
+            },
+        },
+    )
+
+    assert result_state.results_interpretation is not None
+    assert result_state.results_interpretation.summary == "Executive Summary"
+    assert result_state.traces[-1] == "results_interpretation:ok"

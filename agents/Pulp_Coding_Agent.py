@@ -73,7 +73,6 @@ def _build_math_payload(modelling: ModellingRecommendation | dict[str, Any] | No
         outputs_dir = get_test_outputs_dir()
         objective_path = outputs_dir / "llm_objective_function.md"
         constraints_path = outputs_dir / "llm_constraints.md"
-        documentation_path = outputs_dir / "llm_output.md"
         constraints_raw = constraints_path.read_text(encoding="utf-8") if constraints_path.exists() else ""
         return {
             "mathematical_model": {
@@ -83,14 +82,13 @@ def _build_math_payload(modelling: ModellingRecommendation | dict[str, Any] | No
                 "constraint_functions": [
                     line.strip() for line in constraints_raw.splitlines() if line.strip()
                 ],
-                "readable_documentation": documentation_path.read_text(encoding="utf-8").strip()
-                if documentation_path.exists()
-                else "",
             }
         }
 
-    if isinstance(modelling, ModellingRecommendation):
+    if hasattr(modelling, "model_dump"):
         model_dict = modelling.model_dump()
+    elif isinstance(modelling, dict):
+        model_dict = modelling
     else:
         model_dict = dict(modelling)
 
@@ -102,7 +100,6 @@ def _build_math_payload(modelling: ModellingRecommendation | dict[str, Any] | No
                 for item in model_dict.get("constraint_functions", [])
                 if str(item).strip()
             ],
-            "readable_documentation": str(model_dict.get("readable_documentation", "")).strip(),
         }
     }
 
@@ -131,13 +128,16 @@ def _preprocessing_payload(
 ) -> dict[str, Any]:
     if preprocessing is None:
         return {}
-    if isinstance(preprocessing, PreprocessingRecommendation):
+    if hasattr(preprocessing, "model_dump"):
         return {
             "mapper_script": preprocessing.mapper_script,
             "mapping_notes": preprocessing.mapping_notes,
             "assumptions": preprocessing.assumptions,
         }
-    preprocessing_dict = dict(preprocessing)
+    elif isinstance(preprocessing, dict):
+        preprocessing_dict = preprocessing
+    else:
+        preprocessing_dict = dict(preprocessing)
     return {
         "mapper_script": str(preprocessing_dict.get("mapper_script", "")),
         "mapping_notes": list(preprocessing_dict.get("mapping_notes", [])),
@@ -203,15 +203,6 @@ def _truncate_scripting_context(
             ctx["preprocessing"] = preprocessing
             truncations.append("preprocessing.mapper_script")
 
-    if not _fits():
-        math_model = ctx.get("mathematical_model", {})
-        if isinstance(math_model, dict) and math_model.get("readable_documentation"):
-            math_model["readable_documentation"] = (
-                "# truncated: see objective_function and constraint_functions"
-            )
-            ctx["mathematical_model"] = math_model
-            truncations.append("mathematical_model.readable_documentation")
-
     if truncations:
         add_milestone(
             "context_truncated",
@@ -261,10 +252,13 @@ def run_pulp_coding_agent(
 
     if input_schema_payload is not None:
         schema_payload = input_schema_payload
-    elif preprocessing is not None and isinstance(preprocessing, PreprocessingRecommendation):
+    elif preprocessing is not None and hasattr(preprocessing, "model_dump"):
         schema_payload = preprocessing.input_schema_payload
     elif preprocessing is not None:
-        schema_payload = dict(preprocessing).get("input_schema_payload", {})
+        if isinstance(preprocessing, dict):
+            schema_payload = preprocessing.get("input_schema_payload", {})
+        else:
+            schema_payload = dict(preprocessing).get("input_schema_payload", {})
     else:
         schema_payload = load_csv_input_schema(str(resolved_csv_path), preview_rows)
     add_milestone(

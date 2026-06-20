@@ -106,7 +106,6 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
         outputs_dir = get_test_outputs_dir()
         objective_path = outputs_dir / "llm_objective_function.md"
         constraints_path = outputs_dir / "llm_constraints.md"
-        documentation_path = outputs_dir / "llm_output.md"
         constraints_raw = constraints_path.read_text(encoding="utf-8") if constraints_path.exists() else ""
         return {
             "mathematical_model": {
@@ -116,14 +115,13 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
                 "constraint_functions": [
                     line.strip() for line in constraints_raw.splitlines() if line.strip()
                 ],
-                "readable_documentation": documentation_path.read_text(encoding="utf-8").strip()
-                if documentation_path.exists()
-                else "",
             }
         }
 
-    if isinstance(modelling, ModellingRecommendation):
+    if hasattr(modelling, "model_dump"):
         model_dict = modelling.model_dump()
+    elif isinstance(modelling, dict):
+        model_dict = modelling
     else:
         model_dict = dict(modelling)
 
@@ -135,7 +133,6 @@ def _build_model_payload(modelling: ModellingRecommendation | dict[str, Any] | N
                 for item in model_dict.get("constraint_functions", [])
                 if str(item).strip()
             ],
-            "readable_documentation": str(model_dict.get("readable_documentation", "")).strip(),
         }
     }
 
@@ -196,8 +193,10 @@ def run_data_processor_agent(
         """Returns upstream use-case contract for preprocessing context."""
         if use_case is None:
             return {}
-        if isinstance(use_case, UseCaseRecommendation):
+        if hasattr(use_case, "model_dump"):
             return use_case.model_dump()
+        elif isinstance(use_case, dict):
+            return use_case
         return dict(use_case)
 
     prompt = load_system_prompt_result("preprocessing")

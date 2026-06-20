@@ -9,6 +9,7 @@ from schemas.basemodels import (
     ModellingRecommendation,
     PipelineState,
     ScriptingRecommendation,
+    ResultsInterpretationRecommendation,
 )
 
 
@@ -43,3 +44,23 @@ def test_modeling_and_scripting_contracts() -> None:
 
     assert modeling.objective_function.startswith("max")
     assert scripting.successful_implementation is True
+
+
+def test_results_interpretation_contract() -> None:
+    interpretation = ResultsInterpretationRecommendation(
+        summary="Summary text.",
+        objective_interpretation="Objective meaning.",
+        key_decisions=["Decision 1"],
+        actionable_recommendations=["Recommendation 1"],
+        constraints_analysis="Constraints info.",
+        sensitivity_notes=["Sensitivity note."],
+        caveats=["Caveat."],
+    )
+    assert interpretation.summary == "Summary text."
+    
+    state = PipelineState(
+        csv_file_path="optimization_pipeline_test_easy.csv",
+        results_interpretation=interpretation
+    )
+    assert state.results_interpretation is not None
+    assert state.results_interpretation.summary == "Summary text."

@@ -29,17 +29,18 @@ def test_live_nodes_can_run_individually() -> None:
     use_case = cast(PipelineStateDict, run_agent_node("use_case", initialized).model_dump())
     modelling = cast(PipelineStateDict, run_agent_node("modeling", use_case).model_dump())
     preprocessing = cast(PipelineStateDict, run_agent_node("preprocessing", modelling).model_dump())
-    scripting = run_agent_node("scripting", preprocessing)
+    scripting = cast(PipelineStateDict, run_agent_node("scripting", preprocessing).model_dump())
+    results_interpretation = run_agent_node("results_interpretation", scripting)
 
-    assert scripting.status in {"ok", "error"}
-    assert scripting.execution_metadata
-    scripting_metadata = scripting.execution_metadata[-1]
+    assert results_interpretation.status in {"ok", "error"}
+    assert results_interpretation.execution_metadata
+    interpretation_metadata = results_interpretation.execution_metadata[-1]
     timeout_s = float(os.getenv("OLLAMA_REQUEST_TIMEOUT_S", "180"))
     max_retries = int(os.getenv("OLLAMA_REQUEST_MAX_RETRIES", "1"))
-    assert scripting_metadata.duration_seconds is not None
-    assert scripting_metadata.duration_seconds <= (timeout_s * (max_retries + 1)) + 60
-    if scripting.status == "error":
-        assert any(note.startswith("debug_milestones=") for note in scripting_metadata.notes)
+    assert interpretation_metadata.duration_seconds is not None
+    assert interpretation_metadata.duration_seconds <= (timeout_s * (max_retries + 1)) + 60
+    if results_interpretation.status == "error":
+        assert any(note.startswith("debug_milestones=") for note in interpretation_metadata.notes)
 
 
 @pytest.mark.skipif(

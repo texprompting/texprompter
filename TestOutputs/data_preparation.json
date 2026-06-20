@@ -1,88 +1,96 @@
 {
-  "imports": "import pandas as pd",
-  "data_loading": "df = pd.read_csv('optimization_pipeline_test_medium.csv')",
+  "imports": "import pandas as pd\nimport numpy as np",
+  "data_loading": "import pandas as pd\n\ncsv_path = \"/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpryfoqoqc.csv\"\ntry:\n    df = pd.read_csv(csv_path)\nexcept FileNotFoundError:\n    df = pd.read_csv(\"tmpryfoqoqc.csv\")",
   "preprocessing_steps": [
-    "Load the CSV file into a pandas DataFrame.",
-    "Extract unique product SKUs to form the index set I.",
-    "Create dictionaries mapping each product SKU to its corresponding parameters (price, cost, molding time, assembly time, max capacity).",
-    "Define global constants for total molding and assembly capacities."
+    "Load the CSV file from the specified path.",
+    "Downsample the dataset by taking every 50th row to make the optimization problem computationally tractable while preserving the temporal structure.",
+    "Reset the index of the downsampled DataFrame to create a clean sequential index.",
+    "Define the set of time steps T using 1-based indexing.",
+    "Extract the parameters H_t and C_t as dictionaries indexed by T.",
+    "Define the constants W_init, W_target, P_req, delta_w, E_h, E_f, and E_p."
   ],
   "sets": [
     {
-      "name": "I",
-      "description": "Set of products to produce",
-      "source_column": "Product_SKU",
-      "python_representation": "I = df['Product_SKU'].unique()"
+      "name": "T",
+      "description": "Set of time steps representing the sequence of operations",
+      "source_column": "Timestamp",
+      "python_representation": "T = list(df_downsampled.index + 1)"
     }
   ],
   "parameters": [
     {
-      "symbol": "p",
-      "description": "Sale price per unit for each product",
+      "symbol": "H_t",
+      "description": "Heat cover closed status at time step t (1 if closed, 0 otherwise)",
       "source_columns": [
-        "Sale_Price_Per_Unit"
+        "HeatCoverClosed"
       ],
-      "python_representation": "p = dict(zip(df['Product_SKU'], df['Sale_Price_Per_Unit']))"
+      "python_representation": "H_dict = {t: int(df_downsampled.loc[t-1, 'HeatCoverClosed']) for t in T}"
     },
     {
-      "symbol": "c",
-      "description": "Material cost per unit for each product",
+      "symbol": "C_t",
+      "description": "Cup state at time step t",
       "source_columns": [
-        "Material_Cost_Per_Unit"
+        "CupState"
       ],
-      "python_representation": "c = dict(zip(df['Product_SKU'], df['Material_Cost_Per_Unit']))"
+      "python_representation": "C_dict = {t: int(df_downsampled.loc[t-1, 'CupState']) for t in T}"
     },
     {
-      "symbol": "m",
-      "description": "Molding minutes required per unit for each product",
+      "symbol": "W_init",
+      "description": "Initial weight of the cup",
       "source_columns": [
-        "Molding_Mins_Req"
+        "CurrentWeight"
       ],
-      "python_representation": "m = dict(zip(df['Product_SKU'], df['Molding_Mins_Req']))"
+      "python_representation": "W_init = float(df_downsampled['CurrentWeight'].iloc[0])"
     },
     {
-      "symbol": "a",
-      "description": "Assembly minutes required per unit for each product",
-      "source_columns": [
-        "Assembly_Mins_Req"
-      ],
-      "python_representation": "a = dict(zip(df['Product_SKU'], df['Assembly_Mins_Req']))"
-    },
-    {
-      "symbol": "M",
-      "description": "Maximum market capacity for each product",
-      "source_columns": [
-        "Max_Market_Capacity"
-      ],
-      "python_representation": "M = dict(zip(df['Product_SKU'], df['Max_Market_Capacity']))"
-    },
-    {
-      "symbol": "C_m",
-      "description": "Total available molding minutes (global constant)",
+      "symbol": "W_target",
+      "description": "Target weight of the cup",
       "source_columns": [],
-      "python_representation": "C_m = 5000  # Example value, typically provided as a global constraint"
+      "python_representation": "W_target = 15.0"
     },
     {
-      "symbol": "C_a",
-      "description": "Total available assembly minutes (global constant)",
+      "symbol": "P_req",
+      "description": "Required production steps",
       "source_columns": [],
-      "python_representation": "C_a = 4000  # Example value, typically provided as a global constraint"
+      "python_representation": "P_req = 4"
+    },
+    {
+      "symbol": "delta_w",
+      "description": "Weight increment per production step",
+      "source_columns": [],
+      "python_representation": "delta_w = 1.0"
+    },
+    {
+      "symbol": "E_h",
+      "description": "Heater energy coefficient",
+      "source_columns": [],
+      "python_representation": "E_h = 10.0"
+    },
+    {
+      "symbol": "E_f",
+      "description": "Fan energy coefficient",
+      "source_columns": [],
+      "python_representation": "E_f = 2.0"
+    },
+    {
+      "symbol": "E_p",
+      "description": "Heating time percent energy coefficient",
+      "source_columns": [],
+      "python_representation": "E_p = 0.1"
     }
   ],
   "data_structures_ready": true,
   "mapping_explanation": [
-    "Product_SKU maps to the index set I.",
-    "Sale_Price_Per_Unit maps to parameter p_i.",
-    "Material_Cost_Per_Unit maps to parameter c_i.",
-    "Molding_Mins_Req maps to parameter m_i.",
-    "Assembly_Mins_Req maps to parameter a_i.",
-    "Max_Market_Capacity maps to parameter M_i.",
-    "C_m and C_a are global constants representing total resource capacities."
+    "HeatCoverClosed maps to H_t, which represents the availability of the heater at time step t.",
+    "CupState maps to C_t, which represents the state of the cup at time step t.",
+    "CurrentWeight is used to initialize the weight parameter W_init from its first row.",
+    "Timestamp is used to define the sequence of time steps T."
   ],
   "assumptions": [
-    "Each row in the CSV represents a unique product SKU.",
-    "Global capacities C_m and C_a are not in the CSV and must be provided separately as constants.",
-    "Data contains no missing values for the mapped columns."
+    "Downsampling by a factor of 50 is sufficient to capture the system's behavior while keeping the optimization problem size reasonable for standard solvers.",
+    "The initial weight W_init can be dynamically set to the first observed value of CurrentWeight in the dataset, which is approximately 0.092.",
+    "The weight increment parameter delta_w is assumed to be 1.0 to satisfy the target weight constraint within the required production steps.",
+    "The time steps are sequential and evenly spaced."
   ],
-  "full_script": "import pandas as pd\n\n# Load data\ndf = pd.read_csv('optimization_pipeline_test_medium.csv')\n\n# Define index set I\nI = df['Product_SKU'].unique()\n\n# Define parameters as dictionaries keyed by product SKU\np = dict(zip(df['Product_SKU'], df['Sale_Price_Per_Unit']))\nc = dict(zip(df['Product_SKU'], df['Material_Cost_Per_Unit']))\nm = dict(zip(df['Product_SKU'], df['Molding_Mins_Req']))\na = dict(zip(df['Product_SKU'], df['Assembly_Mins_Req']))\nM = dict(zip(df['Product_SKU'], df['Max_Market_Capacity']))\n\n# Global constants for resource capacities\nC_m = 5000  # Total available molding minutes\nC_a = 4000  # Total available assembly minutes\n\n# Data structures are now ready for optimization modeling"
+  "full_script": "import pandas as pd\nimport numpy as np\n\ndef prepare_data(csv_path):\n    # Load the data\n    try:\n        df = pd.read_csv(csv_path)\n    except FileNotFoundError:\n        df = pd.read_csv(\"tmpryfoqoqc.csv\")\n    \n    # Downsample the data to make the optimization problem computationally tractable\n    # Taking every 50th row reduces the size from 7728 to ~155 rows.\n    df_downsampled = df.iloc[::50].reset_index(drop=True)\n    \n    # Define the set of time steps (1-based indexing)\n    T = list(df_downsampled.index + 1)\n    \n    # Extract parameters as dictionaries indexed by T\n    H_dict = {t: int(df_downsampled.loc[t-1, 'HeatCoverClosed']) for t in T}\n    C_dict = {t: int(df_downsampled.loc[t-1, 'CupState']) for t in T}\n    \n    # Constants\n    W_init = float(df_downsampled['CurrentWeight'].iloc[0]) if 'CurrentWeight' in df_downsampled.columns else 0.092\n    W_target = 15.0\n    P_req = 4\n    delta_w = 1.0\n    E_h = 10.0\n    E_f = 2.0\n    E_p = 0.1\n    \n    # Package data structures\n    data = {\n        \"T\": T,\n        \"H\": H_dict,\n        \"C\": C_dict,\n        \"W_init\": W_init,\n        \"W_target\": W_target,\n        \"P_req\": P_req,\n        \"delta_w\": delta_w,\n        \"E_h\": E_h,\n        \"E_f\": E_f,\n        \"E_p\": E_p\n    }\n    \n    return data\n\nif __name__ == \"__main__\":\n    csv_path = \"/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpryfoqoqc.csv\"\n    data = prepare_data(csv_path)\n    print(\"Data preparation complete. Number of time steps:\", len(data[\"T\"]))"
 }

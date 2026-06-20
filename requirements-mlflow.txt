@@ -7,3 +7,5 @@
 # and `mlflow.genai.evaluate(...)`.
 mlflow[genai]>=2.18.0
 openai>=1.40.0
+fastapi>=0.110.0
+uvicorn>=0.23.0

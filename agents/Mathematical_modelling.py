@@ -59,10 +59,6 @@ def _persist_outputs(recommendation: ModellingRecommendation) -> None:
             "\n".join(item.strip() for item in recommendation.constraint_functions),
             encoding="utf-8",
         )
-        (outputs_dir / "llm_output.md").write_text(
-            recommendation.readable_documentation.strip(),
-            encoding="utf-8",
-        )
     except OSError as io_err:
         # Non-fatal: the agent result is still valid; we just could not persist
         # the side-output files (e.g. in CI or a read-only environment).
@@ -93,53 +89,56 @@ def run_mathematical_modelling_agent(
     if not resolved_csv_path.exists():
         raise FileNotFoundError(f"CSV file not found: {resolved_csv_path}")
 
-    @tool
-    def get_column_names() -> dict[str, Any]:
-        """Returns available columns and a compact preview from the selected CSV."""
-        df_preview = pd.read_csv(resolved_csv_path, nrows=preview_rows)
-        return {
-            "csv_file_path": str(resolved_csv_path),
-            "columns": [str(column) for column in df_preview.columns.tolist()],
-            "preview_rows": df_preview.to_dict(orient="records"),
+    # Get column names and preview
+    df_preview = pd.read_csv(resolved_csv_path, nrows=preview_rows)
+    columns_info = {
+        "csv_file_path": str(resolved_csv_path),
+        "columns": [str(column) for column in df_preview.columns.tolist()],
+        "preview_rows": df_preview.to_dict(orient="records"),
+    }
+
+    # Get reference model
+    reference_model = _load_reference_model()
+
+    # Get use case recommendation
+    if use_case is None:
+        use_case_info = {
+            "use_case_name": "Production Planning",
+            "business_goal": "Optimize quantity to produce for each product.",
+            "objective_direction": "max",
+            "objective_variable": "total profit",
+            "decision_variables": ["production_quantity_per_product"],
+            "required_columns": [],
+            "constraints_to_consider": [],
+            "assumptions": ["Use-case recommendation missing; fallback context used."],
+            "rationale": "Fallback use case injected by modelling stage.",
         }
-
-    @tool
-    def get_reference_model() -> dict[str, Any]:
-        """Returns the reference model style for notation and structure."""
-        return _load_reference_model()
-
-    @tool
-    def get_use_case_recommendation() -> dict[str, Any]:
-        """Returns the selected upstream use-case recommendation."""
-        if use_case is None:
-            return {
-                "use_case_name": "Production Planning",
-                "business_goal": "Optimize quantity to produce for each product.",
-                "objective_direction": "max",
-                "objective_variable": "total profit",
-                "decision_variables": ["production_quantity_per_product"],
-                "required_columns": [],
-                "constraints_to_consider": [],
-                "assumptions": ["Use-case recommendation missing; fallback context used."],
-                "rationale": "Fallback use case injected by modelling stage.",
-            }
-
-        if isinstance(use_case, UseCaseRecommendation):
-            return use_case.model_dump()
-        return dict(use_case)
+    elif hasattr(use_case, "model_dump"):
+        use_case_info = use_case.model_dump()
+    elif isinstance(use_case, dict):
+        use_case_info = use_case
+    else:
+        use_case_info = dict(use_case)
 
     prompt = load_system_prompt_result("modeling")
+    
+    # Core fix area: ensuring the underlying model uses with_structured_output
+    # if your custom create_agent wrapper allows it.
     agent = create_agent(
         model=build_chat_model(),
-        tools=[get_use_case_recommendation, get_column_names, get_reference_model],
+        tools=[],
         system_prompt=prompt.template,
         response_format=ModellingRecommendation,
     )
-    user_message = (
-        "Create a MILP formulation for optimizing production quantity per product "
-        "using only tool outputs."
-    )
-
+    
+    user_message = f"""Create a MILP formulation for optimizing production quantity per product.
+                        CSV Data Information:
+                        {json.dumps(columns_info, indent=2)}
+                        Reference Model:
+                        {json.dumps(reference_model, indent=2)}
+                        Use Case Recommendation:
+                        {json.dumps(use_case_info, indent=2)}
+                        """
     response = invoke_agent_with_prompt_trace(
         agent,
         stage="modeling",
@@ -147,18 +146,49 @@ def run_mathematical_modelling_agent(
         user_message=user_message,
     )
 
+    print(response)
+
     structured = response.get("structured_response")
+    
+    # --- START DEFENSIVE ALIAS RECOVERY LAYER ---
+    # If structured response is missing or raw parsing fails, extract raw dict and map keys safely
     if structured is None:
-        # Fallback: attempt to parse the last AI message text as JSON.
         last_content = _last_ai_content(response.get("messages", []))
         if last_content:
             try:
-                structured = ModellingRecommendation.model_validate_json(last_content)
+                # Attempt to parse whatever JSON text string came out
+                raw_json = json.loads(last_content)
+                if isinstance(raw_json, dict):
+                    # Actively reconstruct the payload matching ModellingRecommendation's strict keys
+                    mapped_payload = {
+                        "objective_function": raw_json.get("objective_function") or raw_json.get("objective") or raw_json.get("objective_expr") or "",
+                        "constraint_functions": raw_json.get("constraint_functions") or raw_json.get("constraints") or raw_json.get("constraint_list") or [],
+                        "variables": raw_json.get("variables") or raw_json.get("decision_variables") or [],
+                        "parameters": raw_json.get("parameters") or raw_json.get("parameter_list") or [],
+                        "minimizing_problem": raw_json.get("minimizing_problem", True)
+                    }
+                    structured = ModellingRecommendation.model_validate(mapped_payload)
             except Exception:
                 pass
+                
+    elif isinstance(structured, dict):
+        # Even if 'structured_response' returned a dict, check if Gemini chose intuitive alias keys
+        mapped_payload = {
+            "objective_function": structured.get("objective_function") or structured.get("objective") or structured.get("objective_expr") or "",
+            "constraint_functions": structured.get("constraint_functions") or structured.get("constraints") or structured.get("constraint_list") or [],
+            "variables": structured.get("variables") or structured.get("decision_variables") or [],
+            "parameters": structured.get("parameters") or structured.get("parameter_list") or [],
+            "minimizing_problem": structured.get("minimizing_problem", True)
+        }
+        structured = ModellingRecommendation.model_validate(mapped_payload)
+        
+    elif isinstance(structured, ModellingRecommendation):
+        # If it successfully returned a strict object, we are perfectly fine
+        pass
+    # --- END DEFENSIVE ALIAS RECOVERY LAYER ---
+
     if structured is None:
         raise ValueError("modeling agent did not produce a structured_response.")
-
 
     recommendation = _coerce_recommendation(structured)
     _persist_outputs(recommendation)
