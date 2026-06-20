@@ -1,5 +1,9 @@
-u_t \\ge a_t - a_{t-1} \\quad \\forall t \\in T \\setminus \\{1\\}
-v_t \\ge m_t - m_{t-1} \\quad \\forall t \\in T \\setminus \\{1\\}
-a_t \\ge F_t \\quad \\forall t \\in T
-m_t \\le 1 - S^{full}_t \\quad \\forall t \\in T
-m_t \\ge 1 - S^{min}_t \\quad \\forall t \\in T
+h_t \\le H_t \\quad \\forall t \\in T
+p_t \\le 100 \\cdot h_t \\quad \\forall t \\in T
+p_t \\ge 0 \\quad \\forall t \\in T
+y_t \\le C_t \\quad \\forall t \\in T
+y_t \\le h_t \\quad \\forall t \\in T
+w_t = w_{t-1} + \\Delta w \\cdot y_t \\quad \\forall t \\in T \\setminus \\{1\\}
+w_1 = W_{init} + \\Delta w \\cdot y_1
+w_N \\ge W_{target}
+\\sum_{t \\in T} y_t \\ge P_{req}

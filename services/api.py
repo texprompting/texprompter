@@ -118,6 +118,12 @@ class ScriptingRequest(BaseModel):
     preview_rows: int = 5
 
 
+class ResultsInterpretationRequest(BaseModel):
+    use_case: Dict[str, Any]
+    modelling: Dict[str, Any]
+    scripting: Dict[str, Any]
+
+
 @app.post("/pipeline/rerun-modeling")
 def rerun_modeling(request: ModelingRequest) -> Dict[str, Any]:
     csv_path = _write_csv_to_temp(request.csv_content)
@@ -181,6 +187,18 @@ def scripting(request: ScriptingRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
         Path(csv_path).unlink(missing_ok=True)
+
+
+@app.post("/pipeline/results-interpretation")
+def results_interpretation(request: ResultsInterpretationRequest) -> Dict[str, Any]:
+    try:
+        return service.results_interpretation(
+            use_case=request.use_case,
+            modelling=request.modelling,
+            scripting=request.scripting,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/pipeline/regenerate-feedback")

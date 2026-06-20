@@ -1,1 +1,1 @@
-\\sum_{t \\in T} (E_a a_t + E_m m_t + C_a u_t + C_m v_t)
+\\sum_{t \\in T} (E_h \\cdot h_t + E_f \\cdot f_t + E_p \\cdot p_t)

@@ -287,3 +287,58 @@ if st.session_state.pipeline_state.get("scripting"):
                         st.info("No rows match active filter bounds.")
             else:
                 st.info("ℹ️ Optimization finished perfectly, but no decision variable allocation arrays were found in the return data frame.")
+
+
+if st.session_state.pipeline_state.get("results_interpretation"):
+    interpretation = st.session_state.pipeline_state["results_interpretation"]
+    st.divider()
+    st.header("📢 Optimization Business Insights & Interpretation")
+    
+    # Executive Summary Card
+    st.success(f"**Executive Summary:**\n\n{interpretation.get('summary', 'N/A')}")
+    
+    # Grid/Columns for Objective and Actionable Recommendations
+    col_obj, col_rec = st.columns([1, 1])
+    
+    with col_obj:
+        st.subheader("🎯 Business Objective Impact")
+        st.info(interpretation.get("objective_interpretation", "N/A"))
+        
+        st.subheader("🔗 Constraints & Active Bottlenecks")
+        st.write(interpretation.get("constraints_analysis", "N/A"))
+        
+    with col_rec:
+        st.subheader("📋 Actionable Recommendations")
+        recs = interpretation.get("actionable_recommendations", [])
+        if recs:
+            for idx, rec in enumerate(recs, 1):
+                st.markdown(f"**{idx}.** {rec}")
+        else:
+            st.write("No recommendations generated.")
+
+    # Key Decisions
+    st.subheader("💡 Key Allocations & Decisions")
+    decisions = interpretation.get("key_decisions", [])
+    if decisions:
+        for dec in decisions:
+            st.markdown(f"- {dec}")
+    else:
+        st.write("No key decisions listed.")
+        
+    # Sensitivity & Caveats in an expander
+    with st.expander("🔍 Sensitivity Notes & Caveats", expanded=False):
+        tab_sens, tab_caveats = st.tabs(["📊 Sensitivity Analysis", "⚠️ Caveats & Assumptions"])
+        with tab_sens:
+            sens_notes = interpretation.get("sensitivity_notes", [])
+            if sens_notes:
+                for note in sens_notes:
+                    st.markdown(f"- {note}")
+            else:
+                st.write("No sensitivity notes provided.")
+        with tab_caveats:
+            caveats = interpretation.get("caveats", [])
+            if caveats:
+                for caveat in caveats:
+                    st.markdown(f"- {caveat}")
+            else:
+                st.write("No caveats provided.")

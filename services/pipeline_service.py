@@ -12,6 +12,7 @@ from orchestrator.pipeline import (
     run_parameter_estimation_agent,
     run_preprocessing_agent,
     run_scripting_agent,
+    run_results_interpretation_agent,
 )
 
 
@@ -82,6 +83,16 @@ class PipelineService:
             return None
 
         return self.basemodels.PreprocessingRecommendation.model_validate(data)
+
+    def scripting_model(self, data):
+        if not data:
+            return None
+        return self.basemodels.ScriptingRecommendation.model_validate(data)
+
+    def results_interpretation_model(self, data):
+        if not data:
+            return None
+        return self.basemodels.ResultsInterpretationRecommendation.model_validate(data)
 
     # ------------------------------------------------------------------
     # Pipeline
@@ -199,6 +210,28 @@ class PipelineService:
         return self._clean(result)
 
     # ------------------------------------------------------------------
+    # Results Interpretation
+    # ------------------------------------------------------------------
+
+    def results_interpretation(
+        self,
+        use_case: Dict,
+        modelling: Dict,
+        scripting: Dict,
+    ):
+        uc = self.use_case_model(use_case)
+        md = self.modelling_model(modelling)
+        script = self.scripting_model(scripting)
+
+        result = run_results_interpretation_agent(
+            use_case=uc,
+            modelling=md,
+            scripting=script,
+        )
+
+        return self._clean(result)
+
+    # ------------------------------------------------------------------
     # Complete downstream execution
     # ------------------------------------------------------------------
 
@@ -227,9 +260,16 @@ class PipelineService:
             preview_rows,
         )
 
+        results_interpretation = self.results_interpretation(
+            use_case,
+            modelling,
+            scripting,
+        )
+
         return {
             "preprocessing": preprocessing,
             "scripting": scripting,
+            "results_interpretation": results_interpretation,
         }
 
     def save_results(

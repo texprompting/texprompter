@@ -379,6 +379,50 @@ class ScriptingRecommendation(BaseModel):
         return _coerce_json_collection(value)
 
 
+class ResultsInterpretationRecommendation(BaseModel):
+    """Output contract for the results interpretation agent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    summary: str = Field(
+        description="Executive summary (2-3 sentences) of the optimization outcome."
+    )
+    objective_interpretation: str = Field(
+        description="What the objective value means in concrete business terms."
+    )
+    key_decisions: list[str] = Field(
+        default_factory=list,
+        description="Bullet points of the most important decision variable allocations.",
+    )
+    actionable_recommendations: list[str] = Field(
+        default_factory=list,
+        description="Concrete steps to implement the optimization results.",
+    )
+    constraints_analysis: str = Field(
+        default="",
+        description="Which constraints are binding/active and their business implications.",
+    )
+    sensitivity_notes: list[str] = Field(
+        default_factory=list,
+        description="Notes on which inputs the solution is most sensitive to.",
+    )
+    caveats: list[str] = Field(
+        default_factory=list,
+        description="Limitations, assumptions, or areas of uncertainty.",
+    )
+
+    @field_validator(
+        "key_decisions",
+        "actionable_recommendations",
+        "sensitivity_notes",
+        "caveats",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_list_fields(cls, value: Any) -> Any:
+        return _coerce_json_collection(value)
+
+
 # ---------------------------------------------------------------------------
 # Pipeline metadata
 # ---------------------------------------------------------------------------
@@ -430,6 +474,7 @@ class PipelineState(BaseModel):
     parameter_estimation: ParameterEstimationRecommendation | None = None
     preprocessing: PreprocessingRecommendation | None = None
     scripting: ScriptingRecommendation | None = None
+    results_interpretation: ResultsInterpretationRecommendation | None = None
     errors: list[AgentError] = Field(default_factory=list)
     traces: list[str] = Field(default_factory=list)
     llm_artifacts: dict[str, Any] = Field(default_factory=dict)

@@ -28,6 +28,7 @@ from schemas.basemodels import (
     ParameterEstimationRecommendation,
     PipelineState,
     PreprocessingRecommendation,
+    ResultsInterpretationRecommendation,
     ScriptingRecommendation,
     StallReason,
     UseCaseRecommendation,
@@ -49,6 +50,7 @@ class PipelineStateDict(TypedDict, total=False):
     parameter_estimation: dict[str, Any] | None
     preprocessing: dict[str, Any] | None
     scripting: dict[str, Any] | None
+    results_interpretation: dict[str, Any] | None
     errors: list[dict[str, Any]]
     traces: list[str]
     llm_artifacts: dict[str, Any]
@@ -690,6 +692,37 @@ def run_scripting_agent(
     return recommendation
 
 
+def run_results_interpretation_agent(
+    use_case: UseCaseRecommendation | None,
+    modelling: ModellingRecommendation | None,
+    scripting: ScriptingRecommendation | None,
+    return_debug: bool = False,
+) -> ResultsInterpretationRecommendation | dict[str, Any]:
+    from agents.Results_Interpreter_Agent import run_results_interpreter_agent
+
+    raw_payload = run_results_interpreter_agent(
+        use_case=use_case,
+        modelling=modelling,
+        scripting=scripting,
+        return_debug=return_debug,
+    )
+    raw_result, tool_trace, debug_payload = _extract_result_and_debug(raw_payload)
+
+    if not isinstance(raw_result, dict):
+        raise ValueError("Results_Interpreter_Agent did not return a valid payload.")
+
+    recommendation = ResultsInterpretationRecommendation.model_validate(raw_result)
+
+    if return_debug:
+        return {
+            "result": recommendation.model_dump(),
+            "tool_trace": tool_trace,
+            "debug": debug_payload,
+        }
+    return recommendation
+
+
+
 def _is_stage_skipped(state: PipelineState, stage_name: str) -> bool:
     return stage_name in state.skip_stages
 
@@ -1077,6 +1110,59 @@ def scripting_node(state: PipelineStateDict) -> PipelineStateDict:
     return current_state.model_dump()
 
 
+def results_interpretation_node(state: PipelineStateDict) -> PipelineStateDict:
+    current_state = PipelineState.model_validate(state)
+    if current_state.status == "error":
+        return current_state.model_dump()
+
+    if _is_stage_skipped(current_state, "results_interpretation"):
+        _append_trace(current_state, "results_interpretation:skipped")
+        return current_state.model_dump()
+
+    started_at = time.time()
+    _emit_progress("results_interpretation:start")
+    tool_trace: list[str] = []
+    try:
+        payload, tool_trace, debug_payload = _run_stage_with_optional_debug(
+            run_results_interpretation_agent,
+            use_case=current_state.use_case,
+            modelling=current_state.modelling,
+            scripting=current_state.scripting,
+        )
+        current_state.results_interpretation = ResultsInterpretationRecommendation.model_validate(payload)
+        _record_prompt_lineage(current_state, stage_name="results_interpretation", debug_payload=debug_payload)
+        _append_trace(current_state, "results_interpretation:ok")
+        _record_execution_metadata(
+            current_state,
+            agent_name="results_interpretation_agent",
+            started_at=started_at,
+            status="ok",
+            tool_calls=tool_trace,
+            notes=_debug_notes(debug_payload),
+        )
+        _emit_progress("results_interpretation:ok")
+    except Exception as error:
+        _log_traceback_to_mlflow("results_interpretation_agent")
+        exception_tool_trace, debug_payload = _extract_exception_debug(error)
+        if exception_tool_trace:
+            tool_trace = exception_tool_trace
+        _record_prompt_lineage(current_state, stage_name="results_interpretation", debug_payload=debug_payload)
+        _set_error(current_state, "results_interpretation_agent", error)
+        _append_trace(current_state, "results_interpretation:error")
+        _record_execution_metadata(
+            current_state,
+            agent_name="results_interpretation_agent",
+            started_at=started_at,
+            status="error",
+            tool_calls=tool_trace,
+            notes=[str(error), *_debug_notes(debug_payload)],
+        )
+        _emit_progress(f"results_interpretation:error - {error}")
+
+    return current_state.model_dump()
+
+
+
 def _status_router(state: PipelineStateDict) -> str:
     return "stop" if state.get("status") == "error" else "continue"
 
@@ -1127,6 +1213,7 @@ def build_pipeline_graph() -> Any:
     builder.add_node("parameter_estimation", parameter_estimation_node)
     builder.add_node("preprocessing", preprocessing_node)
     builder.add_node("scripting", scripting_node)
+    builder.add_node("results_interpretation", results_interpretation_node)
 
     builder.add_edge(START, "initialize")
     builder.add_conditional_edges(
@@ -1169,7 +1256,15 @@ def build_pipeline_graph() -> Any:
             "stop": END,
         },
     )
-    builder.add_edge("scripting", END)
+    builder.add_conditional_edges(
+        "scripting",
+        _status_router,
+        {
+            "continue": "results_interpretation",
+            "stop": END,
+        },
+    )
+    builder.add_edge("results_interpretation", END)
 
     return builder.compile()
 
@@ -1183,6 +1278,7 @@ def run_agent_node(agent_name: str, state: PipelineStateDict) -> PipelineState:
         "parameter_estimation": parameter_estimation_node,
         "preprocessing": preprocessing_node,
         "scripting": scripting_node,
+        "results_interpretation": results_interpretation_node,
     }
     if agent_name not in nodes:
         raise ValueError(f"Unknown agent node '{agent_name}'. Expected one of: {', '.join(nodes)}")
@@ -1341,8 +1437,8 @@ def run_downstream_agents(
     modelling: Any | None,
     input_schema_payload: dict[str, Any] | None,
     preview_rows: int = 5,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Run preprocessing and scripting agents from an existing pipeline state."""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Run preprocessing, scripting and results interpretation agents from an existing pipeline state."""
     _setup_mlflow()
     resolved_use_case = _normalize_use_case(use_case)
     resolved_modelling = _normalize_modelling(modelling)
@@ -1414,6 +1510,11 @@ def run_downstream_agents(
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
         )
+        results_interpretation_result = run_results_interpretation_agent(
+            use_case=resolved_use_case,
+            modelling=resolved_modelling,
+            scripting=scripting_result if isinstance(scripting_result, ScriptingRecommendation) else ScriptingRecommendation.model_validate(scripting_result),
+        )
 
         mlflow_status = "FINISHED"
         return (
@@ -1421,6 +1522,7 @@ def run_downstream_agents(
             pe_rec.model_dump(),
             preprocessing_result.model_dump(),
             scripting_result.model_dump(),
+            results_interpretation_result.model_dump(),
         )
     finally:
         if mlflow_run_started:
@@ -1434,7 +1536,7 @@ def rerun_modeling_with_feedback(
     current_modelling: Any | None,
     input_schema_payload: dict[str, Any] | None,
     preview_rows: int = 5,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Rerun modeling and downstream agents based on user feedback."""
     _setup_mlflow()
     resolved_use_case = _validate_and_extend_use_case_feedback(use_case, feedback)
@@ -1518,6 +1620,11 @@ def rerun_modeling_with_feedback(
             input_schema_payload=resolved_input_schema_payload,
             preview_rows=preview_rows,
         )
+        results_interpretation_result = run_results_interpretation_agent(
+            use_case=resolved_use_case,
+            modelling=updated_modelling,
+            scripting=scripting_result if isinstance(scripting_result, ScriptingRecommendation) else ScriptingRecommendation.model_validate(scripting_result),
+        )
 
         mlflow_status = "FINISHED"
         return (
@@ -1525,6 +1632,7 @@ def rerun_modeling_with_feedback(
             pe_rec.model_dump(),
             preprocessing_result.model_dump(),
             scripting_result.model_dump(),
+            results_interpretation_result.model_dump(),
         )
     finally:
         if mlflow_run_started:

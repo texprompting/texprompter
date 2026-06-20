@@ -178,6 +178,21 @@ def scripting(
     )
 
 
+def results_interpretation(
+    use_case: Dict[str, Any],
+    modelling: Dict[str, Any],
+    scripting: Dict[str, Any],
+) -> Dict[str, Any]:
+    return _post(
+        "/pipeline/results-interpretation",
+        {
+            "use_case": use_case,
+            "modelling": modelling,
+            "scripting": scripting,
+        },
+    )
+
+
 def regenerate_feedback(
     csv_content: str,
     use_case: Dict[str, Any],

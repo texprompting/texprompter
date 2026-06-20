@@ -13,6 +13,7 @@ from app.api_client import (
     save_results as api_save_results,
     stream_start_pipeline as api_stream_start_pipeline,
     scripting as api_scripting,
+    results_interpretation as api_results_interpretation,
 )
 
 pipeline_service = PipelineService()
@@ -73,6 +74,10 @@ def map_trace(trace: str) -> tuple[str, str]:
         ),
         "scripting:ok": (
             "✅ PuLP model compiled and solved in sandbox.",
+            "🤖 Interpreting optimization results and generating insights..."
+        ),
+        "results_interpretation:ok": (
+            "✅ Optimization results interpreted successfully.",
             "🎉 Optimization pipeline run complete!"
         )
     }
@@ -113,7 +118,7 @@ def execute_pipeline(log_renderer=None):
                         
                         friendly_msg, next_label = map_trace(trace)
                         status.write(friendly_msg)
-                        if trace == "scripting:ok":
+                        if trace in ("results_interpretation:ok", "results_interpretation:skipped"):
                             status.update(label=next_label, state="complete")
                         else:
                             status.update(label=next_label, state="running")
@@ -170,6 +175,7 @@ def execute_downstream():
 
     st.session_state.pipeline_state["preprocessing"] = downstream.get("preprocessing")
     st.session_state.pipeline_state["scripting"] = downstream.get("scripting")
+    st.session_state.pipeline_state["results_interpretation"] = downstream.get("results_interpretation")
 
 
 def approve_and_continue():
@@ -197,6 +203,7 @@ def approve_and_continue():
 
     st.session_state.pipeline_state["preprocessing"] = downstream.get("preprocessing")
     st.session_state.pipeline_state["scripting"] = downstream.get("scripting")
+    st.session_state.pipeline_state["results_interpretation"] = downstream.get("results_interpretation")
     st.session_state.show_modeling_intercept = False
     st.session_state.execution_complete = True
     add_log("✅ Downstream run completed successfully.")
