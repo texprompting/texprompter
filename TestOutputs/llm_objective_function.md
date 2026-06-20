@@ -1,1 +1,1 @@
-\\sum_{t \\in T} (\\alpha \\cdot x_t + \\beta \\cdot y_t + \\gamma \\cdot u_t)
+\\sum_{t \\in T} (E_a a_t + E_m m_t + C_a u_t + C_m v_t)

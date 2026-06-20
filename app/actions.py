@@ -49,6 +49,36 @@ def _csv_content() -> str:
     return str(st.session_state.csv_file)
 
 
+def map_trace(trace: str) -> tuple[str, str]:
+    mapping = {
+        "initialize:ok": (
+            "✅ Workspace and pipeline initialized.",
+            "🎯 Identifying business goal and use case..."
+        ),
+        "use_case:ok": (
+            "✅ Business goals and target KPIs identified.",
+            "📝 Formulating abstract MILP mathematical model..."
+        ),
+        "modeling:ok": (
+            "✅ Decision variables and MILP constraints formulated.",
+            "📊 Estimating parameters and bounds from dataset..."
+        ),
+        "parameter_estimation:ok": (
+            "✅ Dataset parameters and capacities estimated.",
+            "⚙️ Generating data preprocessing mapper script..."
+        ),
+        "preprocessing:ok": (
+            "✅ CSV data mapper compiled successfully.",
+            "🚀 Executing optimization solver in secure sandbox..."
+        ),
+        "scripting:ok": (
+            "✅ PuLP model compiled and solved in sandbox.",
+            "🎉 Optimization pipeline run complete!"
+        )
+    }
+    return mapping.get(trace, (f"✓ {trace}", "Executing pipeline..."))
+
+
 def execute_pipeline(log_renderer=None):
     ensure_csv_path()
 
@@ -69,7 +99,7 @@ def execute_pipeline(log_renderer=None):
             initial_prompt=st.session_state.initial_prompt,
         )
 
-    with st.status("Executing pipeline...", expanded=True) as status:
+    with st.status("🚀 Initializing data pipeline...", expanded=True) as status:
         for state_update in pipeline_iterator:
             if isinstance(state_update, dict):
                 st.session_state.pipeline_state.update(state_update)
@@ -80,7 +110,14 @@ def execute_pipeline(log_renderer=None):
                         add_log(trace)
                         if log_renderer is not None:
                             log_renderer()
-                        status.write(f"✓ {trace}")
+                        
+                        friendly_msg, next_label = map_trace(trace)
+                        status.write(friendly_msg)
+                        if trace == "scripting:ok":
+                            status.update(label=next_label, state="complete")
+                        else:
+                            status.update(label=next_label, state="running")
+                            
                     seen_traces = len(traces)
 
                 if state_update.get("errors"):

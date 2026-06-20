@@ -1,4 +1,28 @@
+import re
+
 import streamlit as st
+
+
+def normalize_latex(s: str) -> str:
+    """Normalize LaTeX strings from LLM output for Streamlit rendering.
+
+    LLMs produce varying backslash-escaping levels depending on how the
+    JSON structured output is serialised:
+
+    * Double-escaped: ``\\\\sum`` (2 actual backslashes) → ``\\sum``
+    * Already correct: ``\\sum`` (1 backslash) → ``\\sum`` (unchanged)
+
+    ``st.latex()`` and Streamlit's inline ``$…$`` markdown both require
+    exactly one backslash per LaTeX command.  This function collapses
+    runs of 2+ consecutive backslashes into a single backslash so the
+    result is always correct regardless of the upstream escaping level.
+    """
+    if not s:
+        return s
+    # Strip surrounding whitespace and dollar-sign delimiters some models emit
+    s = str(s).strip().strip("$")
+    # Collapse 2+ consecutive backslashes → 1 backslash
+    return re.sub(r"\\{2,}", lambda _: "\\", s)
 
 
 def display_modeling_output(modeling_dict: dict):
@@ -15,15 +39,11 @@ def display_modeling_output(modeling_dict: dict):
     # 1. Objective Function Display (Using st.latex for Block Math)
     # ------------------------------------------------------------------------
     st.subheader("Objective Function")
-    st.markdown(f"**{'Minimize' if is_minimizing else 'Maximize'}**")
     obj_fn = modeling_dict.get("objective_function", "")
     if obj_fn:
-        clean_obj = str(obj_fn).strip().strip("$")
-        try:
-            clean_obj = clean_obj.encode('utf-8').decode('unicode_escape')
-        except Exception:
-            pass
-        st.latex("\\min" if is_minimizing else "\\max" + clean_obj)
+        clean_obj = normalize_latex(obj_fn)
+        prefix = r"\min \;" if is_minimizing else r"\max \;"
+        st.latex(prefix + clean_obj)
     else:
         st.write("No objective function defined.")
 
@@ -44,11 +64,7 @@ def display_modeling_output(modeling_dict: dict):
                         name = getattr(var, "variable", None) or getattr(var, "name", "")
                         desc = getattr(var, "meaning", None) or getattr(var, "description", "")
 
-                    clean_name = str(name).strip().strip("$")
-                    try:
-                        clean_name = clean_name.encode('utf-8').decode('unicode_escape')
-                    except Exception:
-                        pass
+                    clean_name = normalize_latex(name)
                     st.markdown(f"${clean_name}$ : {desc}")
             else:
                 st.write("No variables defined.")
@@ -68,11 +84,7 @@ def display_modeling_output(modeling_dict: dict):
                         symbol = getattr(param, "symbol", None) or getattr(param, "name", "")
                         desc = getattr(param, "meaning", None) or getattr(param, "description", "")
 
-                    clean_symbol = str(symbol).strip().strip("$")
-                    try:
-                        clean_symbol = clean_symbol.encode('utf-8').decode('unicode_escape')
-                    except Exception:
-                        pass
+                    clean_symbol = normalize_latex(symbol)
                     st.markdown(f"${clean_symbol}$ : {desc}")
             else:
                 st.write("No parameters defined.")
@@ -85,11 +97,7 @@ def display_modeling_output(modeling_dict: dict):
     if constraints:
         for constraint in constraints:
             if isinstance(constraint, str):
-                clean_constraint = constraint.strip().strip("$")
-                try:
-                    clean_constraint = clean_constraint.encode('utf-8').decode('unicode_escape')
-                except Exception:
-                    pass
+                clean_constraint = normalize_latex(constraint)
                 st.latex(clean_constraint)
     else:
         st.write("No constraints defined.")

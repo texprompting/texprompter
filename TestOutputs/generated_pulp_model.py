@@ -6,77 +6,86 @@ def solve_model(csv_path: str) -> dict[str, Any]:
     # Load the dataset
     df = pd.read_csv(csv_path)
     
-    # Preprocessing: Ensure correct data types and handle any missing values
-    df['HeatCoverClosed'] = df['HeatCoverClosed'].fillna(0).astype(int)
-    df['Produce'] = df['Produce'].fillna(0).astype(int)
+    # Sort by Timestamp to ensure chronological order
+    df = df.sort_values('Timestamp').reset_index(drop=True)
     
-    # Define the set of time steps
+    # Handle missing values if any
+    df = df.fillna(0)
+    
+    # Ensure binary signals are integers
+    df['FunnelBlocked.I_xSignal'] = df['FunnelBlocked.I_xSignal'].astype(int)
+    df['StorageSiloFull.I_xSignal'] = df['StorageSiloFull.I_xSignal'].astype(int)
+    df['StorageSiloMinFull.I_xSignal'] = df['StorageSiloMinFull.I_xSignal'].astype(int)
+    
+    # Define sets
     T = df.index.tolist()
     
-    # Define parameters as dictionaries indexed by time step t
-    H = df['HeatCoverClosed'].to_dict()
-    R = df['Produce'].to_dict()
+    # Define parameters
+    F = df['FunnelBlocked.I_xSignal'].tolist()
+    S_full = df['StorageSiloFull.I_xSignal'].tolist()
+    S_min = df['StorageSiloMinFull.I_xSignal'].tolist()
     
-    # Scalar parameters
-    alpha = 15.0
-    beta = 3.0
-    gamma = 0.2
-    P_min = 10.0
+    # Cost coefficients
+    E_a = 1.0
+    E_m = 1.0
+    C_a = 1.0
+    C_m = 1.0
     
-    # Define the problem (minimizing cost/energy)
-    prob = pulp.LpProblem("Heater_Fan_Optimization", pulp.LpMinimize)
+    # Initialize the model
+    model = pulp.LpProblem("Industrial_Control_Optimization", pulp.LpMinimize)
     
     # Decision variables
-    # x_t: HeaterOn (binary)
-    # y_t: FanOn (binary)
-    # u_t: HeatingTimePercent (continuous, between 0 and 100)
-    x = pulp.LpVariable.dicts("x", T, cat=pulp.LpBinary)
-    y = pulp.LpVariable.dicts("y", T, cat=pulp.LpBinary)
-    u = pulp.LpVariable.dicts("u", T, lowBound=0, upBound=100, cat=pulp.LpContinuous)
+    a = pulp.LpVariable.dicts("a", T, cat='Binary')
+    m = pulp.LpVariable.dicts("m", T, cat='Binary')
+    u = pulp.LpVariable.dicts("u", T, lowBound=0, cat='Continuous')
+    v = pulp.LpVariable.dicts("v", T, lowBound=0, cat='Continuous')
+    
+    # Objective function
+    model += pulp.lpSum(
+        1.5 * E_a * a[t] + 2.0 * E_m * m[t] + 10.0 * C_a * u[t] + 15.0 * C_m * v[t]
+        for t in T
+    )
     
     # Constraints
     for t in T:
-        # x_t <= H_t
-        prob += x[t] <= H[t], f"HeatCoverClosed_constraint_{t}"
-        # x_t >= R_t
-        prob += x[t] >= R[t], f"Produce_constraint_{t}"
-        # u_t <= 100 * x_t
-        prob += u[t] <= 100 * x[t], f"Max_HeatingTimePercent_{t}"
-        # u_t >= P_min * x_t
-        prob += u[t] >= P_min * x[t], f"Min_HeatingTimePercent_{t}"
-        # y_t >= x_t
-        prob += y[t] >= x[t], f"Fan_Heater_relation_{t}"
+        # Boundary and transition constraints for u and v
+        if t == 0:
+            model += u[t] >= a[t]
+            model += v[t] >= m[t]
+        else:
+            model += u[t] >= a[t] - a[t-1]
+            model += v[t] >= m[t] - m[t-1]
+            
+        # Activation constraints
+        model += a[t] >= F[t]
+        model += m[t] <= 1 - S_full[t]
+        model += m[t] >= 1 - S_min[t]
         
-    # Objective function
-    prob += pulp.lpSum(alpha * x[t] + beta * y[t] + gamma * u[t] for t in T)
+    # Solve the model
+    status = model.solve(pulp.PULP_CBC_CMD(msg=False))
     
-    # Solve the problem
-    status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
+    # Prepare results
+    solution_status = pulp.LpStatus[status]
+    objective_value = pulp.value(model.objective) if solution_status == "Optimal" else None
     
     # Extract decision variables
     decision_variables = {}
-    for t in T:
-        decision_variables[f"x_{t}"] = float(x[t].varValue) if x[t].varValue is not None else 0.0
-        decision_variables[f"y_{t}"] = float(y[t].varValue) if y[t].varValue is not None else 0.0
-        decision_variables[f"u_{t}"] = float(u[t].varValue) if u[t].varValue is not None else 0.0
-        
-    objective_value = pulp.value(prob.objective)
-    solution_status = pulp.LpStatus[status]
-    
+    if solution_status == "Optimal":
+        for t in T:
+            decision_variables[f"a_{t}"] = float(a[t].varValue)
+            decision_variables[f"m_{t}"] = float(m[t].varValue)
+            decision_variables[f"u_{t}"] = float(u[t].varValue)
+            decision_variables[f"v_{t}"] = float(v[t].varValue)
+            
     return {
         "solution_status": solution_status,
         "objective_value": objective_value,
         "decision_variables": decision_variables,
-        "solver_message": f"Optimization completed with status: {solution_status}"
+        "solver_message": f"Model solved with status: {solution_status}"
     }
 
 if __name__ == "__main__":
     # Example execution with default path
-    import os
-    csv_path = "/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmpsmp8c87w.csv"
-    if os.path.exists(csv_path):
-        results = solve_model(csv_path)
-        print("Status:", results["solution_status"])
-        print("Objective Value:", results["objective_value"])
-    else:
-        print(f"File not found: {csv_path}")
+    res = solve_model("/var/folders/yl/x3_zrbc16q18h23q2t01c0lr0000gn/T/tmptodp1mlw.csv")
+    print("Status:", res["solution_status"])
+    print("Objective:", res["objective_value"])

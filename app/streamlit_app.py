@@ -31,6 +31,10 @@ st.title("TexPrompter - Workflow Optimizer")
 
 initialize_session_state()
 
+# Placeholder for subtle logs renderer
+def render_logs():
+    pass
+
 if USE_PIPELINE_API:
     try:
         if not api_health_check():
@@ -80,7 +84,7 @@ with st.sidebar:
     )
 
     if st.session_state.csv_file and not st.session_state.execution_running:
-        if st.button("🚀 Start Analysis", use_container_width=True):
+        if st.button("🚀 Start Analysis", width="stretch"):
             st.session_state.execution_running = True
             st.session_state.execution_complete = False
             st.session_state.pipeline_state = {}
@@ -95,29 +99,30 @@ with st.sidebar:
             add_log("Analysis started...")
             st.rerun()
 
+    # Subtle execution logs in sidebar
+    if st.session_state.agent_logs:
+        st.divider()
+        with st.expander("📋 Execution Logs", expanded=False):
+            sidebar_log_placeholder = st.empty()
+            def render_logs():
+                if not st.session_state.agent_logs:
+                    sidebar_log_placeholder.text("No execution logs yet.")
+                else:
+                    formatted = "\n".join(entry["message"] for entry in st.session_state.agent_logs)
+                    sidebar_log_placeholder.text(formatted)
+            render_logs()
+
 if not st.session_state.csv_file:
     st.info("👈 Please upload a CSV file to get started")
 else:
     with st.expander("📊 CSV Preview", expanded=False):
         try:
             df = pd.read_csv(StringIO(st.session_state.csv_file.decode()))
-            st.dataframe(df.head(10), use_container_width=True)
+            st.dataframe(df.head(10), width="stretch")
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
 
-    log_container = st.container()
     outputs_container = st.container()
-
-    with log_container:
-        with st.expander("📋 Execution Logs", expanded=True):
-            log_placeholder = st.empty()
-            def render_logs():
-                if not st.session_state.agent_logs:
-                    log_placeholder.text("No execution logs yet.")
-                else:
-                    formatted = "\n".join(entry["message"] for entry in st.session_state.agent_logs)
-                    log_placeholder.text(formatted)
-            render_logs()
 
     if st.session_state.execution_running:
         try:
@@ -134,13 +139,8 @@ else:
             if st.session_state.pipeline_state.get("use_case"):
                 use_case = st.session_state.pipeline_state["use_case"]
                 with st.expander("📌 Use Case Analysis", expanded=True):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader("Business Goal")
-                        st.write(use_case.get("business_goal", "N/A"))
-                    with col2:
-                        st.subheader("Objective Direction")
-                        st.write(use_case.get("objective_direction", "N/A"))
+                    st.subheader("Business Goal")
+                    st.write(use_case.get("business_goal", "N/A"))
 
             if st.session_state.pipeline_state.get("modelling"):
                 if st.session_state.execution_complete or not st.session_state.show_modeling_intercept:
@@ -158,7 +158,7 @@ else:
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                if st.button("✅ Approve Everything & Continue", use_container_width=True):
+                if st.button("✅ Approve Everything & Continue", width="stretch"):
                     try:
                         with st.spinner("⏳ Compiling data preprocessing mappers and runtime scripts..."):
                             approve_and_continue()
@@ -167,12 +167,12 @@ else:
                         st.error(f"❌ Downstream execution failed: {str(e)}")
 
             with col2:
-                if st.button("✏️ Edit & Re-run Both Steps", use_container_width=True):
+                if st.button("✏️ Edit & Re-run Both Steps", width="stretch"):
                     st.session_state.modeling_edit_mode = True
                     st.rerun()
 
             with col3:
-                if st.button("❌ Cancel Run", use_container_width=True):
+                if st.button("❌ Cancel Run", width="stretch"):
                     reset_run_state()
                     add_log("Run cancelled and execution state reset.")
                     st.rerun()
@@ -186,7 +186,7 @@ else:
 
                 col_save, col_cancel = st.columns(2)
                 with col_save:
-                    if st.button("🔄 Regenerate Model & Estimates", use_container_width=True):
+                    if st.button("🔄 Regenerate Model & Estimates", width="stretch"):
                         if not feedback_text.strip():
                             st.error("Please supply explicit adjustment directions.")
                         else:
@@ -198,7 +198,7 @@ else:
                                 st.error(f"Error executing feedback adjustment: {str(e)}")
 
                 with col_cancel:
-                    if st.button("Cancel Feedback", use_container_width=True):
+                    if st.button("Cancel Feedback", width="stretch"):
                         st.session_state.modeling_edit_mode = False
                         st.rerun()
 
@@ -216,7 +216,7 @@ else:
             data=results_json,
             file_name=f"pipeline_results_{st.session_state.csv_filename.replace('.csv', '')}_{st.session_state.initial_prompt[:20]}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
 
     elif st.session_state.last_error:
@@ -277,12 +277,12 @@ if st.session_state.pipeline_state.get("scripting"):
                 col_table, col_chart = st.columns([1, 1.2])
                 with col_table:
                     st.markdown("**Allocation Data Frame**")
-                    st.dataframe(df_vars, use_container_width=True, hide_index=True)
+                    st.dataframe(df_vars, width="stretch", hide_index=True)
 
                 with col_chart:
                     st.markdown("**Visual Allocation Chart**")
                     if not df_vars.empty:
-                        st.bar_chart(data=df_vars, x="Variable / Resource Allocation", y="Calculated Optimal Value", use_container_width=True)
+                        st.bar_chart(data=df_vars, x="Variable / Resource Allocation", y="Calculated Optimal Value", width="stretch")
                     else:
                         st.info("No rows match active filter bounds.")
             else:
