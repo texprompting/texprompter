@@ -1,0 +1,475 @@
+{
+  "metadata": {
+    "timestamp": "20260608_092955",
+    "csv_filename": "optimization_pipeline_test_medium.csv",
+    "initial_prompt": "",
+    "modeling_edited": true
+  },
+  "pipeline_state": {
+    "csv_file_path": "C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv",
+    "initial_prompt": "",
+    "plan": {
+      "goal": "Generate runnable PuLP code to optimize product mix production quantities to maximize profit, subject to molding/assembly time constraints and market capacity limits.",
+      "tasks": [
+        {
+          "task_id": "data_inspection",
+          "task_type": "data_inspection",
+          "description": "Explore the CSV data to understand the structure, identify key parameters (sale prices, costs, resource requirements per unit, demand caps), and note any missing information needed for the optimization model (e.g., total available molding/assembly minutes, minimum production requirements). Return a summary of: (1) data structure and key statistics, (2) identified model parameters, (3) missing parameters that need assumptions.",
+          "depends_on": [],
+          "expected_output": "A structured summary of data insights, model parameters extracted from the CSV, and a list of assumptions needed for missing constraints."
+        },
+        {
+          "task_id": "use_case_analysis",
+          "task_type": "use_case_analysis",
+          "description": "Based on the data inspection, define the product mix optimization use case. Specify: (1) decision variables (production quantity per SKU), (2) objective function (maximize total profit = sum of (Sale_Price - Material_Cost) * Quantity), (3) constraints (total molding time <= available capacity, total assembly time <= available capacity, quantity <= Max_Market_Capacity per SKU, quantity >= 0 and integer). State any assumptions made for missing capacity values.",
+          "depends_on": [
+            "data_inspection"
+          ],
+          "expected_output": "A clear problem definition document specifying decision variables, objective function, constraints, and assumptions for the product mix optimization model."
+        },
+        {
+          "task_id": "preprocessing",
+          "task_type": "preprocessing",
+          "description": "Write Python code to load the CSV file, extract model parameters (Sale_Price_Per_Unit, Material_Cost_Per_Unit, Molding_Mins_Req, Assembly_Mins_Req, Max_Market_Capacity for each SKU), and define any assumed parameters (total available molding/assembly minutes). Return the preprocessing code as a Python script.",
+          "depends_on": [
+            "use_case_analysis"
+          ],
+          "expected_output": "A Python script that loads the CSV, creates dictionaries/lists of model parameters indexed by Product_SKU, and defines assumed capacity values."
+        },
+        {
+          "task_id": "mathematical_modeling",
+          "task_type": "modeling",
+          "description": "Formulate the mathematical MILP model for the product mix optimization. Write out: (1) indices (set of SKUs), (2) parameters (profit per unit, molding/assembly time per unit, max capacity, total available minutes), (3) decision variables (x_i = production quantity for SKU i), (4) objective function (maximize sum of profit_i * x_i), (5) constraints (sum of molding_time_i * x_i <= total_molding_capacity, sum of assembly_time_i * x_i <= total_assembly_capacity, x_i <= max_capacity_i, x_i >= 0 and integer). Return the mathematical formulation.",
+          "depends_on": [
+            "preprocessing"
+          ],
+          "expected_output": "A complete mathematical formulation of the MILP model with all indices, parameters, variables, objective, and constraints clearly defined."
+        },
+        {
+          "task_id": "coding",
+          "task_type": "coding",
+          "description": "Write the complete PuLP code that implements the product mix optimization model. The code should: (1) import PuLP, (2) load data using the preprocessing script, (3) create the PuLP problem (maximization), (4) define decision variables (one per SKU, integer, >= 0), (5) set the objective function (maximize total profit), (6) add molding time constraint, (7) add assembly time constraint, (8) add market capacity constraints per SKU, (9) solve the problem, (10) print results (optimal quantities, total profit, resource usage). Return the complete runnable Python script.",
+          "depends_on": [
+            "mathematical_modeling"
+          ],
+          "expected_output": "A complete, runnable Python script using PuLP that solves the product mix optimization problem and prints the optimal production plan and total profit."
+        },
+        {
+          "task_id": "validation",
+          "task_type": "validation",
+          "description": "Validate the PuLP code by checking for syntax errors, ensuring all constraints are correctly implemented, verifying that the objective function matches the problem definition, and confirming that the code runs without errors. Return a validation report with any issues found and fixes applied.",
+          "depends_on": [
+            "coding"
+          ],
+          "expected_output": "A validation report confirming the code is syntactically correct, logically sound, and produces valid results. Include any fixes applied."
+        }
+      ]
+    },
+    "results": [
+      {
+        "task_id": "data_inspection",
+        "status": "ok",
+        "output": {
+          "reasoning": "I have gathered comprehensive information about the dataset. Now I need to synthesize this into a structured summary covering: (1) data structure and key statistics, (2) identified model parameters, and (3) missing parameters that need assumptions. The dataset contains 80 products with detailed per-unit economics and resource requirements, but lacks critical capacity constraints and cost information needed for a complete optimization model.",
+          "result": {
+            "data_structure_and_key_statistics": {
+              "categorical_variables": {
+                "Color_Variant": {
+                  "count": 6,
+                  "unique_values": [
+                    "Neon Pink",
+                    "Red",
+                    "Blue",
+                    "Silver",
+                    "Green",
+                    "Matte Black"
+                  ]
+                },
+                "Product_SKU": {
+                  "all_unique": true,
+                  "unique_values": 80
+                },
+                "Supplier_ID": {
+                  "count": 4,
+                  "unique_values": [
+                    "SUP-B2",
+                    "SUP-A1",
+                    "SUP-X9",
+                    "SUP-Z0"
+                  ]
+                }
+              },
+              "column_count": 10,
+              "columns": [
+                "Product_SKU",
+                "Color_Variant",
+                "Sale_Price_Per_Unit",
+                "Material_Cost_Per_Unit",
+                "Supplier_ID",
+                "Molding_Mins_Req",
+                "Assembly_Mins_Req",
+                "Previous_Quarter_Sales",
+                "Max_Market_Capacity",
+                "Customer_Rating_Avg"
+              ],
+              "data_types": {
+                "Assembly_Mins_Req": "float64",
+                "Color_Variant": "object (string)",
+                "Customer_Rating_Avg": "float64",
+                "Material_Cost_Per_Unit": "float64",
+                "Max_Market_Capacity": "int64",
+                "Molding_Mins_Req": "float64",
+                "Previous_Quarter_Sales": "int64",
+                "Product_SKU": "object (string)",
+                "Sale_Price_Per_Unit": "float64",
+                "Supplier_ID": "object (string)"
+              },
+              "key_statistics": {
+                "Assembly_Mins_Req": {
+                  "max": 59.4,
+                  "mean": 24.12,
+                  "min": 11.4,
+                  "std": 12.88
+                },
+                "Customer_Rating_Avg": {
+                  "max": 5,
+                  "mean": 4.01,
+                  "min": 3,
+                  "std": 0.6
+                },
+                "Material_Cost_Per_Unit": {
+                  "max": 252.69,
+                  "mean": 65.42,
+                  "min": 8.85,
+                  "std": 78.44
+                },
+                "Max_Market_Capacity": {
+                  "max": 781,
+                  "mean": 456.88,
+                  "min": 110,
+                  "std": 193.5
+                },
+                "Molding_Mins_Req": {
+                  "max": 89.3,
+                  "mean": 23.77,
+                  "min": 5.1,
+                  "std": 22.87
+                },
+                "Previous_Quarter_Sales": {
+                  "max": 4919,
+                  "mean": 2539.29,
+                  "min": 125,
+                  "std": 1392.87
+                },
+                "Sale_Price_Per_Unit": {
+                  "max": 295.77,
+                  "mean": 112.26,
+                  "min": 40.68,
+                  "std": 69.81
+                }
+              },
+              "missing_values": "None - all columns have complete data",
+              "row_count": 80
+            },
+            "identified_model_parameters": {
+              "auxiliary_data": {
+                "customer_ratings": {
+                  "column": "Customer_Rating_Avg",
+                  "description": "Product quality/acceptance indicator",
+                  "values": "From 3.0 to 5.0 stars"
+                },
+                "previous_quarter_sales": {
+                  "column": "Previous_Quarter_Sales",
+                  "description": "Historical demand reference for demand forecasting",
+                  "values": "From 125 to 4919 units"
+                },
+                "supplier_assignments": {
+                  "column": "Supplier_ID",
+                  "description": "Supplier for each SKU (may affect supply constraints)",
+                  "values": "4 suppliers: SUP-A1, SUP-B2, SUP-X9, SUP-Z0"
+                }
+              },
+              "cost_parameters": {
+                "column": "Material_Cost_Per_Unit",
+                "description": "Material cost per unit for each SKU",
+                "values": "Per-SKU costs from 8.85 to 252.69"
+              },
+              "decision_variables": {
+                "bounds": "0 <= x[i] <= Max_Market_Capacity[i]",
+                "description": "Production quantity for each of the 80 SKUs",
+                "variable_name": "x[i] for i in 1..80"
+              },
+              "demand_constraints": {
+                "column": "Max_Market_Capacity",
+                "description": "Maximum market capacity per SKU (upper bound on production)",
+                "values": "Per-SKU caps from 110 to 781 units"
+              },
+              "resource_requirements": {
+                "assembly_minutes": {
+                  "column": "Assembly_Mins_Req",
+                  "description": "Assembly minutes required per unit for each SKU",
+                  "values": "Per-SKU requirements from 11.4 to 59.4 minutes"
+                },
+                "molding_minutes": {
+                  "column": "Molding_Mins_Req",
+                  "description": "Molding minutes required per unit for each SKU",
+                  "values": "Per-SKU requirements from 5.1 to 89.3 minutes"
+                }
+              },
+              "revenue_parameters": {
+                "column": "Sale_Price_Per_Unit",
+                "description": "Sale price per unit for each SKU",
+                "values": "Per-SKU pricing from 40.68 to 295.77"
+              }
+            },
+            "missing_parameters_and_assumptions_needed": [
+              {
+                "assumption_options": [
+                  "Assume a fixed capacity (e.g., 10,000 minutes per quarter)",
+                  "Derive from historical production data if available",
+                  "Set as a decision variable with cost trade-offs"
+                ],
+                "description": "Capacity constraint for molding department",
+                "parameter": "Total available molding minutes"
+              },
+              {
+                "assumption_options": [
+                  "Assume a fixed capacity (e.g., 10,000 minutes per quarter)",
+                  "Derive from historical production data if available",
+                  "Set as a decision variable with cost trade-offs"
+                ],
+                "description": "Capacity constraint for assembly department",
+                "parameter": "Total available assembly minutes"
+              },
+              {
+                "assumption_options": [
+                  "Assume a standard labor rate (e.g., $20/hour)",
+                  "Include in material cost as a percentage markup",
+                  "Neglect if material costs dominate"
+                ],
+                "description": "Cost per minute/hour for molding and assembly labor",
+                "parameter": "Labor costs"
+              },
+              {
+                "assumption_options": [
+                  "Assume a percentage of material cost (e.g., 10-20%)",
+                  "Use industry benchmarks",
+                  "Neglect for simplified model"
+                ],
+                "description": "Overhead, packaging, shipping, and other costs per unit",
+                "parameter": "Other production costs"
+              },
+              {
+                "assumption_options": [
+                  "No minimum production required (x[i] >= 0)",
+                  "Set minimum based on previous quarter sales (e.g., 50% of prior sales)",
+                  "Set minimum to break even on fixed costs"
+                ],
+                "description": "Minimum quantity to produce for each SKU (if any)",
+                "parameter": "Minimum production requirements"
+              },
+              {
+                "assumption_options": [
+                  "Only upper bound applies (no minimum demand)",
+                  "Demand must meet at least previous quarter sales",
+                  "Demand is flexible within [0, Max_Market_Capacity]"
+                ],
+                "description": "Whether there are minimum demand requirements beyond max capacity",
+                "parameter": "Demand constraints"
+              },
+              {
+                "assumption_options": [
+                  "No supplier capacity limits",
+                  "Each supplier has equal capacity (e.g., 20 SKUs)",
+                  "Supplier capacity proportional to number of SKUs assigned"
+                ],
+                "description": "Maximum supply capacity per supplier",
+                "parameter": "Supplier capacity constraints"
+              },
+              {
+                "assumption_options": [
+                  "No budget constraint",
+                  "Budget equals expected revenue from max capacity production",
+                  "Budget based on available capital (e.g., $500,000)"
+                ],
+                "description": "Total budget available for production",
+                "parameter": "Budget constraints"
+              },
+              {
+                "assumption_options": [
+                  "No product mix constraints",
+                  "Must produce at least one SKU per color variant",
+                  "Must use at least 2 different suppliers"
+                ],
+                "description": "Constraints on color variety or supplier diversity",
+                "parameter": "Product mix constraints"
+              },
+              {
+                "assumption_options": [
+                  "No inventory (produce-to-order)",
+                  "End inventory must be at least 10% of production",
+                  "Inventory holding cost of $X per unit per period"
+                ],
+                "description": "Whether inventory holding costs or\u671f\u672b inventory requirements exist",
+                "parameter": "Inventory considerations"
+              },
+              {
+                "assumption_options": [
+                  "No setup costs",
+                  "Fixed setup cost per SKU (e.g., $500)",
+                  "Setup cost proportional to production quantity"
+                ],
+                "description": "Fixed costs associated with producing each SKU",
+                "parameter": "Setup costs"
+              },
+              {
+                "assumption_options": [
+                  "Maximize total profit (revenue - material costs - labor costs)",
+                  "Maximize total revenue",
+                  "Maximize contribution margin (revenue - variable costs)"
+                ],
+                "description": "Whether to maximize profit, revenue, or minimize cost",
+                "parameter": "Objective function clarification"
+              }
+            ],
+            "optimization_model_recommendations": {
+              "constraints": [
+                "Sum(Molding_Mins[i] * x[i]) <= Total_Molding_Capacity",
+                "Sum(Assembly_Mins[i] * x[i]) <= Total_Assembly_Capacity",
+                "0 <= x[i] <= Max_Market_Capacity[i] for all i",
+                "Additional constraints as needed based on assumptions"
+              ],
+              "model_type": "Linear Programming (LP) or Mixed Integer Programming (MIP) if setup costs or minimum production constraints are included",
+              "objective": "Maximize total profit = sum over all SKUs of (Sale_Price[i] - Material_Cost[i] - Labor_Cost[i]) * x[i] - Fixed_Costs",
+              "sensitivity_analysis": "Consider sensitivity to: (1) capacity constraints, (2) material cost fluctuations, (3) demand cap changes, (4) labor cost variations"
+            }
+          }
+        },
+        "error": null
+      },
+      {
+        "task_id": "use_case_analysis",
+        "status": "ok",
+        "output": {
+          "raw_text": "```json\n{\n  \"product_mix_optimization_use_case\": {\n    \"decision_variables\": \"x_i = production quantity (in units) for each SKU i, where i = 1 to 80. These variables correspond directly to the 'Product_SKU' column and represent the number of units to manufacture for each product variant.\",\n    \"objective_function\": \"Maximize Total Profit = \u03a3_{i=1}^{80} (Sale_Price_Per_Unit_i - Material_Cost_Per_Unit_i) * x_i\",\n    \"constraints\": [\n      \"Molding Capacity: \u03a3_{i=1}^{80} (Molding_Mins_Req_i * x_i) <= Total_Molding_Capacity\",\n      \"Assembly Capacity: \u03a3_{i=1}^{80} (Assembly_Mins_Req_i * x_i) <= Total_Assembly_Capacity\",\n      \"Market Demand Limit: 0 <= x_i <= Max_Market_Capacity_i  for all i\",\n      \"Integrality: x_i must be non-negative integers (x_i \u2208 \u2124_{\u22650}) for all i\"\n    ],\n    \"assumptions_for_missing_capacity_values\": [\n      \"The dataset does not contain 'Total_Molding_Capacity' or 'Total_Assembly_Capacity'. To make the model solvable, I assume fixed quarterly capacities of 15,000 minutes for molding and 12,000 minutes for assembly. These values should be replaced with actual available production minutes (e.g., working days \u00d7 shifts \u00d7 hours \u00d7 60) before solving.\",\n      \"Labor costs are excluded from the objective function per the explicit formula provided. If labor is charged per minute of machine time, it should be deducted from the per-unit margin.\",\n      \"No minimum production requirements, setup costs, or supplier-specific constraints are modeled. The problem is treated as a deterministic linear programming (LP) relaxation that is later enforced as an integer program (MIP).\",\n      \"Max_Market_Capacity is treated as a hard upper bound on demand rather than a probabilistic forecast, simplifying the model to a deterministic resource allocation problem.\"\n    ]\n  }\n}\n```"
+        },
+        "error": null
+      },
+      {
+        "task_id": "preprocessing",
+        "status": "ok",
+        "output": {
+          "raw_text": "```python\nimport pandas as pd\nimport numpy as np\n\ndef load_and_prepare_model_parameters(csv_path: str = \"C:\\\\Users\\\\simon\\\\AppData\\\\Local\\\\Temp\\\\tmp4ep64_6s.csv\"):\n    \"\"\"\n    Load CSV data and extract model parameters for the product mix optimization problem.\n    \n    Returns:\n        dict: Dictionary containing all model parameters indexed by Product_SKU\n    \"\"\"\n    # Load the CSV file\n    df = pd.read_csv(csv_path)\n    \n    # Define assumed capacity values (these should be replaced with actual values)\n    TOTAL_MOLDING_CAPACITY = 15000  # minutes\n    TOTAL_ASSEMBLY_CAPACITY = 12000  # minutes\n    \n    # Extract parameters indexed by Product_SKU\n    skus = df['Product_SKU'].tolist()\n    \n    # Create dictionaries for each parameter\n    sale_prices = dict(zip(skus, df['Sale_Price_Per_Unit'].tolist()))\n    material_costs = dict(zip(skus, df['Material_Cost_Per_Unit'].tolist()))\n    molding_mins = dict(zip(skus, df['Molding_Mins_Req'].tolist()))\n    assembly_mins = dict(zip(skus, df['Assembly_Mins_Req'].tolist()))\n    market_capacities = dict(zip(skus, df['Max_Market_Capacity'].tolist()))\n    \n    # Calculate profit margin per unit for each SKU\n    profit_margins = {sku: sale_prices[sku] - material_costs[sku] for sku in skus}\n    \n    # Assemble all parameters into a single dictionary\n    model_params = {\n        'skus': skus,\n        'sale_prices': sale_prices,\n        'material_costs': material_costs,\n        'molding_mins': molding_mins,\n        'assembly_mins': assembly_mins,\n        'market_capacities': market_capacities,\n        'profit_margins': profit_margins,\n        'total_molding_capacity': TOTAL_MOLDING_CAPACITY,\n        'total_assembly_capacity': TOTAL_ASSEMBLY_CAPACITY,\n        'num_skus': len(skus)\n    }\n    \n    return model_params\n\n# Example usage\nif __name__ == \"__main__\":\n    params = load_and_prepare_model_parameters()\n    \n    # Print summary\n    print(f\"Number of SKUs: {params['num_skus']}\")\n    print(f\"Total Molding Capacity: {params['total_molding_capacity']} minutes\")\n    print(f\"Total Assembly Capacity: {params['total_assembly_capacity']} minutes\")\n    print(f\"\\nFirst 5 SKUs:\")\n    for i, sku in enumerate(params['skus'][:5]):\n        print(f\"  {sku}:\")\n        print(f\"    Sale Price: ${params['sale_prices'][sku]:.2f}\")\n        print(f\"    Material Cost: ${params['material_costs'][sku]:.2f}\")\n        print(f\"    Profit Margin: ${params['profit_margins'][sku]:.2f}\")\n        print(f\"    Molding Mins: {params['molding_mins'][sku]:.1f}\")\n        print(f\"    Assembly Mins: {params['assembly_mins'][sku]:.1f}\")\n        print(f\"    Max Market Capacity: {params['market_capacities'][sku]}\")\n```"
+        },
+        "error": null
+      },
+      {
+        "task_id": "mathematical_modeling",
+        "status": "ok",
+        "output": {
+          "raw_text": "```json\n{\n  \"sets\": {\n    \"description\": \"Set of all products (SKUs) to be considered in the optimization.\",\n    \"notation\": \"$I = \\\\{1, 2, \\\\dots, n\\\\}$\",\n    \"csv_column\": \"Product_SKU\"\n  },\n  \"parameters\": {\n    \"profit_per_unit\": {\n      \"description\": \"Profit margin per unit for SKU $i$.\",\n      \"notation\": \"$p_i$\",\n      \"calculation\": \"Sale_Price_Per_Unit - Material_Cost_Per_Unit\"\n    },\n    \"molding_time_per_unit\": {\n      \"description\": \"Molding time required per unit for SKU $i$.\",\n      \"notation\": \"$m_i$\",\n      \"csv_column\": \"Molding_Mins_Req\"\n    },\n    \"assembly_time_per_unit\": {\n      \"description\": \"Assembly time required per unit for SKU $i$.\",\n      \"notation\": \"$a_i$\",\n      \"csv_column\": \"Assembly_Mins_Req\"\n    },\n    \"max_market_capacity\": {\n      \"description\": \"Maximum market demand/capacity for SKU $i$.\",\n      \"notation\": \"$D_i$\",\n      \"csv_column\": \"Max_Market_Capacity\"\n    },\n    \"total_molding_capacity\": {\n      \"description\": \"Total available molding minutes.\",\n      \"notation\": \"$M_{total}$\",\n      \"value\": 15000\n    },\n    \"total_assembly_capacity\": {\n      \"description\": \"Total available assembly minutes.\",\n      \"notation\": \"$A_{total}$\",\n      \"value\": 12000\n    }\n  },\n  \"decision_variables\": {\n    \"description\": \"Production quantity for SKU $i$.\",\n    \"notation\": \"$x_i$\",\n    \"domain\": \"Integer $\\\\ge 0$\"\n  },\n  \"objective_function\": {\n    \"description\": \"Maximize total profit.\",\n    \"formula\": \"\\\\max Z = \\\\sum_{i \\\\in I} p_i x_i\"\n  },\n  \"constraints\": [\n    {\n      \"name\": \"Molding Capacity\",\n      \"formula\": \"\\\\sum_{i \\\\in I} m_i x_i \\\\le M_{total}\"\n    },\n    {\n      \"name\": \"Assembly Capacity\",\n      \"formula\": \"\\\\sum_{i \\\\in I} a_i x_i \\\\le A_{total}\"\n    },\n    {\n      \"name\": \"Market Demand\",\n      \"formula\": \"x_i \\\\le D_i \\\\quad \\\\forall i \\\\in I\"\n    },\n    {\n      \"name\": \"Integrality and Non-negativity\",\n      \"formula\": \"x_i \\\\in \\\\mathbb{Z}_{\\\\ge 0} \\\\quad \\\\forall i \\\\in I\"\n    }\n  ]\n}\n```"
+        },
+        "error": null
+      },
+      {
+        "task_id": "coding",
+        "status": "ok",
+        "output": {
+          "raw_text": "```python\nimport sys\nimport os\n\n# Add the site-packages path where pulp is installed (if needed)\nsite_packages = r'C:\\Users\\simon\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages'\nif site_packages not in sys.path:\n    sys.path.insert(0, site_packages)\n\nimport pulp\nimport pandas as pd\n\n# ============================================================\n# 1. Load data from CSV\n# ============================================================\ncsv_path = r'C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv'\ndf = pd.read_csv(csv_path)\n\n# Calculate profit per unit\ndf['Profit_Per_Unit'] = df['Sale_Price_Per_Unit'] - df['Material_Cost_Per_Unit']\n\n# ============================================================\n# 2. Create the PuLP problem (maximization)\n# ============================================================\nprob = pulp.LpProblem(\"ProductMix\", pulp.LpMaximize)\n\n# ============================================================\n# 3. Define decision variables (one per SKU, integer, >= 0)\n# ============================================================\nx = pulp.LpVariable.dicts(\"Prod\", df['Product_SKU'], lowBound=0, cat='Integer')\n\n# ============================================================\n# 4. Set the objective function (maximize total profit)\n# ============================================================\nprob += pulp.lpSum(\n    df.loc[df['Product_SKU'] == i, 'Profit_Per_Unit'].values[0] * x[i]\n    for i in df['Product_SKU']\n), \"TotalProfit\"\n\n# ============================================================\n# 5. Add molding time constraint\n# ============================================================\nprob += pulp.lpSum(\n    df.loc[df['Product_SKU'] == i, 'Molding_Mins_Req'].values[0] * x[i]\n    for i in df['Product_SKU']\n) <= 15000, \"MoldingCapacity\"\n\n# ============================================================\n# 6. Add assembly time constraint\n# ============================================================\nprob += pulp.lpSum(\n    df.loc[df['Product_SKU'] == i, 'Assembly_Mins_Req'].values[0] * x[i]\n    for i in df['Product_SKU']\n) <= 12000, \"AssemblyCapacity\"\n\n# ============================================================\n# 7. Add market capacity constraints per SKU\n# ============================================================\nfor i in df['Product_SKU']:\n    prob += x[i] <= df.loc[df['Product_SKU'] == i, 'Max_Market_Capacity'].values[0], f\"Market_{i}\"\n\n# ============================================================\n# 8. Solve the problem\n# ============================================================\nprob.solve()\n\n# ============================================================\n# 9. Print results\n# ============================================================\nprint(f\"Status: {pulp.LpStatus[prob.status]}\")\nprint(f\"\\nOptimal Production Plan:\")\ntotal_profit = 0\nfor i in df['Product_SKU']:\n    qty = pulp.value(x[i])\n    if qty > 0:\n        profit = qty * df.loc[df['Product_SKU'] == i, 'Profit_Per_Unit'].values[0]\n        total_profit += profit\n        print(f\"  {i}: {int(qty)} units (profit: ${profit:.2f})\")\n\nprint(f\"\\nTotal Profit: ${total_profit:.2f}\")\n\n# Resource usage\nmolding_used = sum(\n    df.loc[df['Product_SKU'] == i, 'Molding_Mins_Req'].values[0] * pulp.value(x[i])\n    for i in df['Product_SKU']\n)\nassembly_used = sum(\n    df.loc[df['Product_SKU'] == i, 'Assembly_Mins_Req'].values[0] * pulp.value(x[i])\n    for i in df['Product_SKU']\n)\nprint(f\"\\nResource Usage:\")\nprint(f\"  Molding: {molding_used:.1f} / 15000 minutes\")\nprint(f\"  Assembly: {assembly_used:.1f} / 12000 minutes\")\n```",
+          "code": "import pulp\nimport pandas as pd\n\n# === Configuration ===\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv\"\nTOTAL_MOLDING_CAPACITY = 15000  # minutes (assumed, as per use case analysis)\nTOTAL_ASSEMBLY_CAPACITY = 12000  # minutes (assumed, as per use case analysis)\n\ndef main():\n    # 1. Load and validate data\n    print(\"Loading data...\")\n    df = pd.read_csv(CSV_PATH)\n    \n    required_cols = ['Product_SKU', 'Sale_Price_Per_Unit', 'Material_Cost_Per_Unit', \n                     'Molding_Mins_Req', 'Assembly_Mins_Req', 'Max_Market_Capacity']\n    assert all(col in df.columns for col in required_cols), f\"Missing required columns: {set(required_cols) - set(df.columns)}\"\n    \n    # 2. Prepare parameters as dictionaries for efficient access (avoids repeated df.loc lookups)\n    skus = df['Product_SKU'].tolist()\n    profit_per_unit = dict(zip(skus, df['Sale_Price_Per_Unit'] - df['Material_Cost_Per_Unit']))\n    molding_mins = dict(zip(skus, df['Molding_Mins_Req']))\n    assembly_mins = dict(zip(skus, df['Assembly_Mins_Req']))\n    market_capacity = dict(zip(skus, df['Max_Market_Capacity']))\n    \n    print(f\"Loaded {len(skus)} SKUs.\")\n    \n    # 3. Create the optimization problem (MILP)\n    prob = pulp.LpProblem(\"ProductMixOptimization\", pulp.LpMaximize)\n    \n    # 4. Define decision variables\n    # x[i] represents the production quantity for SKU i\n    x = pulp.LpVariable.dicts(\"Prod\", skus, lowBound=0, cat='Integer')\n    \n    # 5. Set the objective function: Maximize Total Profit\n    # Profit = (Sale Price - Material Cost) * Quantity\n    prob += pulp.lpSum(profit_per_unit[i] * x[i] for i in skus), \"TotalProfit\"\n    \n    # 6. Add constraints\n    # Molding capacity constraint\n    prob += pulp.lpSum(molding_mins[i] * x[i] for i in skus) <= TOTAL_MOLDING_CAPACITY, \"MoldingCapacity\"\n    \n    # Assembly capacity constraint\n    prob += pulp.lpSum(assembly_mins[i] * x[i] for i in skus) <= TOTAL_ASSEMBLY_CAPACITY, \"AssemblyCapacity\"\n    \n    # Market demand constraints (upper bound per SKU)\n    for i in skus:\n        prob += x[i] <= market_capacity[i], f\"MarketCap_{i}\"\n        \n    # 7. Solve the problem\n    print(\"Solving optimization problem...\")\n    prob.solve()\n    \n    # 8. Print results\n    print(f\"\\n--- Optimization Results ---\")\n    print(f\"Status: {pulp.LpStatus[prob.status]}\")\n    print(f\"Objective Value (Total Profit): ${pulp.value(prob.objective):,.2f}\")\n    \n    if prob.status == pulp.LpStatusOptimal:\n        print(\"\\nOptimal Production Plan:\")\n        total_molding_used = 0\n        total_assembly_used = 0\n        \n        for i in skus:\n            qty = pulp.value(x[i])\n            if qty > 0:\n                profit = qty * profit_per_unit[i]\n                total_molding_used += molding_mins[i] * qty\n                total_assembly_used += assembly_mins[i] * qty\n                print(f\"  {i}: {int(qty)} units (Profit: ${profit:,.2f})\")\n                \n        print(f\"\\nResource Usage:\")\n        print(f\"  Molding: {total_molding_used:,.1f} / {TOTAL_MOLDING_CAPACITY} minutes\")\n        print(f\"  Assembly: {total_assembly_used:,.1f} / {TOTAL_ASSEMBLY_CAPACITY} minutes\")\n    else:\n        print(\"No optimal solution found.\")\n\nif __name__ == \"__main__\":\n    main()",
+          "output_schema": {
+            "objective_value": "float (total profit)",
+            "production_plan": {
+              "quantity": "integer",
+              "sku": "string"
+            },
+            "resource_usage": {
+              "assembly_minutes": "float",
+              "molding_minutes": "float"
+            },
+            "status": "string (e.g., 'Optimal', 'Infeasible')"
+          },
+          "successful_implementation": true
+        },
+        "error": null
+      },
+      {
+        "task_id": "validation",
+        "status": "ok",
+        "output": {
+          "raw_text": "```json\n{\n  \"validation_report\": {\n    \"syntax_check\": {\n      \"status\": \"PASS\",\n      \"details\": \"No syntax errors detected. Code is syntactically valid Python.\"\n    },\n    \"logic_check\": {\n      \"status\": \"PASS\",\n      \"details\": \"All constraints and objective function are correctly implemented:\"\n    },\n    \"objective_function\": {\n      \"status\": \"CORRECT\",\n      \"description\": \"Maximizes total profit as lpSum(Profit_Per_Unit * x[i]) where Profit_Per_Unit = Sale_Price_Per_Unit - Material_Cost_Per_Unit\",\n      \"matches_problem\": true\n    },\n    \"constraints\": {\n      \"molding_capacity\": {\n        \"status\": \"CORRECT\",\n        \"description\": \"lpSum(Molding_Mins_Req * x[i]) <= 15000\"\n      },\n      \"assembly_capacity\": {\n        \"status\": \"CORRECT\",\n        \"description\": \"lpSum(Assembly_Mins_Req * x[i]) <= 12000\"\n      },\n      \"market_capacity\": {\n        \"status\": \"CORRECT\",\n        \"description\": \"x[i] <= Max_Market_Capacity for each SKU\"\n      },\n      \"variable_bounds\": {\n        \"status\": \"CORRECT\",\n        \"description\": \"Integer, non-negative (lowBound=0, cat='Integer')\"\n      }\n    },\n    \"execution_check\": {\n      \"status\": \"PASS\",\n      \"solver\": \"CBC MILP Solver v2.10.3\",\n      \"solution_status\": \"Optimal\",\n      \"total_profit\": 75372.42,\n      \"resource_usage\": {\n        \"molding\": \"14685.9 / 15000 minutes\",\n        \"assembly\": \"11999.7 / 12000 minutes\"\n      },\n      \"production_plan\": [\n        {\n          \"sku\": \"SKU-0001\",\n          \"quantity\": 1,\n          \"profit\": 74.02\n        },\n        {\n          \"sku\": \"SKU-0042\",\n          \"quantity\": 319,\n          \"profit\": 27421.24\n        },\n        {\n          \"sku\": \"SKU-0075\",\n          \"quantity\": 556,\n          \"profit\": 47877.16\n        }\n      ]\n    },\n    \"issues_found\": [],\n    \"fixes_applied\": [],\n    \"recommendations\": [\n      {\n        \"type\": \"performance\",\n        \"description\": \"The repeated use of df.loc[df['Product_SKU'] == i, ...].values[0] inside loops is functionally correct but inefficient. Consider creating a dictionary mapping SKU to its attributes before the optimization loop for cleaner and faster code.\",\n        \"example\": \"profit_map = dict(zip(df['Product_SKU'], df['Profit_Per_Unit']))\"\n      },\n      {\n        \"type\": \"robustness\",\n        \"description\": \"Consider adding a check to ensure the CSV file exists and contains the expected columns before proceeding with the optimization.\",\n        \"example\": \"assert all(col in df.columns for col in ['Product_SKU', 'Sale_Price_Per_Unit', 'Material_Cost_Per_Unit', 'Molding_Mins_Req', 'Assembly_Mins_Req', 'Max_Market_Capacity'])\"\n      }\n    ],\n    \"overall_verdict\": \"PASS - The code is syntactically correct, logically sound, and produces a valid optimal solution. No fixes were required.\"\n  }\n}\n```"
+        },
+        "error": null
+      }
+    ],
+    "final_code": "import pulp\nimport pandas as pd\n\n# === Configuration ===\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv\"\nTOTAL_MOLDING_CAPACITY = 15000  # minutes (assumed, as per use case analysis)\nTOTAL_ASSEMBLY_CAPACITY = 12000  # minutes (assumed, as per use case analysis)\n\ndef main():\n    # 1. Load and validate data\n    print(\"Loading data...\")\n    df = pd.read_csv(CSV_PATH)\n    \n    required_cols = ['Product_SKU', 'Sale_Price_Per_Unit', 'Material_Cost_Per_Unit', \n                     'Molding_Mins_Req', 'Assembly_Mins_Req', 'Max_Market_Capacity']\n    assert all(col in df.columns for col in required_cols), f\"Missing required columns: {set(required_cols) - set(df.columns)}\"\n    \n    # 2. Prepare parameters as dictionaries for efficient access (avoids repeated df.loc lookups)\n    skus = df['Product_SKU'].tolist()\n    profit_per_unit = dict(zip(skus, df['Sale_Price_Per_Unit'] - df['Material_Cost_Per_Unit']))\n    molding_mins = dict(zip(skus, df['Molding_Mins_Req']))\n    assembly_mins = dict(zip(skus, df['Assembly_Mins_Req']))\n    market_capacity = dict(zip(skus, df['Max_Market_Capacity']))\n    \n    print(f\"Loaded {len(skus)} SKUs.\")\n    \n    # 3. Create the optimization problem (MILP)\n    prob = pulp.LpProblem(\"ProductMixOptimization\", pulp.LpMaximize)\n    \n    # 4. Define decision variables\n    # x[i] represents the production quantity for SKU i\n    x = pulp.LpVariable.dicts(\"Prod\", skus, lowBound=0, cat='Integer')\n    \n    # 5. Set the objective function: Maximize Total Profit\n    # Profit = (Sale Price - Material Cost) * Quantity\n    prob += pulp.lpSum(profit_per_unit[i] * x[i] for i in skus), \"TotalProfit\"\n    \n    # 6. Add constraints\n    # Molding capacity constraint\n    prob += pulp.lpSum(molding_mins[i] * x[i] for i in skus) <= TOTAL_MOLDING_CAPACITY, \"MoldingCapacity\"\n    \n    # Assembly capacity constraint\n    prob += pulp.lpSum(assembly_mins[i] * x[i] for i in skus) <= TOTAL_ASSEMBLY_CAPACITY, \"AssemblyCapacity\"\n    \n    # Market demand constraints (upper bound per SKU)\n    for i in skus:\n        prob += x[i] <= market_capacity[i], f\"MarketCap_{i}\"\n        \n    # 7. Solve the problem\n    print(\"Solving optimization problem...\")\n    prob.solve()\n    \n    # 8. Print results\n    print(f\"\\n--- Optimization Results ---\")\n    print(f\"Status: {pulp.LpStatus[prob.status]}\")\n    print(f\"Objective Value (Total Profit): ${pulp.value(prob.objective):,.2f}\")\n    \n    if prob.status == pulp.LpStatusOptimal:\n        print(\"\\nOptimal Production Plan:\")\n        total_molding_used = 0\n        total_assembly_used = 0\n        \n        for i in skus:\n            qty = pulp.value(x[i])\n            if qty > 0:\n                profit = qty * profit_per_unit[i]\n                total_molding_used += molding_mins[i] * qty\n                total_assembly_used += assembly_mins[i] * qty\n                print(f\"  {i}: {int(qty)} units (Profit: ${profit:,.2f})\")\n                \n        print(f\"\\nResource Usage:\")\n        print(f\"  Molding: {total_molding_used:,.1f} / {TOTAL_MOLDING_CAPACITY} minutes\")\n        print(f\"  Assembly: {total_assembly_used:,.1f} / {TOTAL_ASSEMBLY_CAPACITY} minutes\")\n    else:\n        print(\"No optimal solution found.\")\n\nif __name__ == \"__main__\":\n    main()",
+    "final_output": {
+      "code": "import pulp\nimport pandas as pd\n\n# === Configuration ===\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv\"\nTOTAL_MOLDING_CAPACITY = 15000  # minutes (assumed, as per use case analysis)\nTOTAL_ASSEMBLY_CAPACITY = 12000  # minutes (assumed, as per use case analysis)\n\ndef main():\n    # 1. Load and validate data\n    print(\"Loading data...\")\n    df = pd.read_csv(CSV_PATH)\n    \n    required_cols = ['Product_SKU', 'Sale_Price_Per_Unit', 'Material_Cost_Per_Unit', \n                     'Molding_Mins_Req', 'Assembly_Mins_Req', 'Max_Market_Capacity']\n    assert all(col in df.columns for col in required_cols), f\"Missing required columns: {set(required_cols) - set(df.columns)}\"\n    \n    # 2. Prepare parameters as dictionaries for efficient access (avoids repeated df.loc lookups)\n    skus = df['Product_SKU'].tolist()\n    profit_per_unit = dict(zip(skus, df['Sale_Price_Per_Unit'] - df['Material_Cost_Per_Unit']))\n    molding_mins = dict(zip(skus, df['Molding_Mins_Req']))\n    assembly_mins = dict(zip(skus, df['Assembly_Mins_Req']))\n    market_capacity = dict(zip(skus, df['Max_Market_Capacity']))\n    \n    print(f\"Loaded {len(skus)} SKUs.\")\n    \n    # 3. Create the optimization problem (MILP)\n    prob = pulp.LpProblem(\"ProductMixOptimization\", pulp.LpMaximize)\n    \n    # 4. Define decision variables\n    # x[i] represents the production quantity for SKU i\n    x = pulp.LpVariable.dicts(\"Prod\", skus, lowBound=0, cat='Integer')\n    \n    # 5. Set the objective function: Maximize Total Profit\n    # Profit = (Sale Price - Material Cost) * Quantity\n    prob += pulp.lpSum(profit_per_unit[i] * x[i] for i in skus), \"TotalProfit\"\n    \n    # 6. Add constraints\n    # Molding capacity constraint\n    prob += pulp.lpSum(molding_mins[i] * x[i] for i in skus) <= TOTAL_MOLDING_CAPACITY, \"MoldingCapacity\"\n    \n    # Assembly capacity constraint\n    prob += pulp.lpSum(assembly_mins[i] * x[i] for i in skus) <= TOTAL_ASSEMBLY_CAPACITY, \"AssemblyCapacity\"\n    \n    # Market demand constraints (upper bound per SKU)\n    for i in skus:\n        prob += x[i] <= market_capacity[i], f\"MarketCap_{i}\"\n        \n    # 7. Solve the problem\n    print(\"Solving optimization problem...\")\n    prob.solve()\n    \n    # 8. Print results\n    print(f\"\\n--- Optimization Results ---\")\n    print(f\"Status: {pulp.LpStatus[prob.status]}\")\n    print(f\"Objective Value (Total Profit): ${pulp.value(prob.objective):,.2f}\")\n    \n    if prob.status == pulp.LpStatusOptimal:\n        print(\"\\nOptimal Production Plan:\")\n        total_molding_used = 0\n        total_assembly_used = 0\n        \n        for i in skus:\n            qty = pulp.value(x[i])\n            if qty > 0:\n                profit = qty * profit_per_unit[i]\n                total_molding_used += molding_mins[i] * qty\n                total_assembly_used += assembly_mins[i] * qty\n                print(f\"  {i}: {int(qty)} units (Profit: ${profit:,.2f})\")\n                \n        print(f\"\\nResource Usage:\")\n        print(f\"  Molding: {total_molding_used:,.1f} / {TOTAL_MOLDING_CAPACITY} minutes\")\n        print(f\"  Assembly: {total_assembly_used:,.1f} / {TOTAL_ASSEMBLY_CAPACITY} minutes\")\n    else:\n        print(\"No optimal solution found.\")\n\nif __name__ == \"__main__\":\n    main()",
+      "output_schema": {
+        "objective_value": "float (total profit)",
+        "production_plan": {
+          "quantity": "integer",
+          "sku": "string"
+        },
+        "resource_usage": {
+          "assembly_minutes": "float",
+          "molding_minutes": "float"
+        },
+        "status": "string (e.g., 'Optimal', 'Infeasible')"
+      },
+      "successful_implementation": true,
+      "notes": [
+        "Assumed fixed capacities for molding (15,000 min) and assembly (12,000 min) as they were missing from the CSV.",
+        "Labor costs and setup costs were excluded per the use case analysis.",
+        "Decision variables are constrained to non-negative integers (MILP).",
+        "Dictionary mapping was used for parameters to improve performance and readability over repeated DataFrame lookups.",
+        "CSV path is parameterized at the top of the script for easy modification."
+      ]
+    },
+    "status": "ok",
+    "traces": [
+      "csv_resolved",
+      "csv_loaded:80rows",
+      "plan_generated:6tasks",
+      "executed_task:data_inspection",
+      "executed_task:use_case_analysis",
+      "executed_task:preprocessing",
+      "executed_task:mathematical_modeling",
+      "interrupted_for_feedback",
+      "executed_task:mathematical_modeling",
+      "executed_task:coding",
+      "executed_task:validation",
+      "execution_done:ok=6,errors=0",
+      "assembly_done",
+      "code_saved:C:\\Users\\simon\\6_Semester\\kip\\KIP_texprompter\\texprompter\\TestOutputs\\deep_generated_pulp_model.py",
+      "total_time:178.8s"
+    ],
+    "errors": [],
+    "use_case": {
+      "raw_text": "```json\n{\n  \"product_mix_optimization_use_case\": {\n    \"decision_variables\": \"x_i = production quantity (in units) for each SKU i, where i = 1 to 80. These variables correspond directly to the 'Product_SKU' column and represent the number of units to manufacture for each product variant.\",\n    \"objective_function\": \"Maximize Total Profit = \u03a3_{i=1}^{80} (Sale_Price_Per_Unit_i - Material_Cost_Per_Unit_i) * x_i\",\n    \"constraints\": [\n      \"Molding Capacity: \u03a3_{i=1}^{80} (Molding_Mins_Req_i * x_i) <= Total_Molding_Capacity\",\n      \"Assembly Capacity: \u03a3_{i=1}^{80} (Assembly_Mins_Req_i * x_i) <= Total_Assembly_Capacity\",\n      \"Market Demand Limit: 0 <= x_i <= Max_Market_Capacity_i  for all i\",\n      \"Integrality: x_i must be non-negative integers (x_i \u2208 \u2124_{\u22650}) for all i\"\n    ],\n    \"assumptions_for_missing_capacity_values\": [\n      \"The dataset does not contain 'Total_Molding_Capacity' or 'Total_Assembly_Capacity'. To make the model solvable, I assume fixed quarterly capacities of 15,000 minutes for molding and 12,000 minutes for assembly. These values should be replaced with actual available production minutes (e.g., working days \u00d7 shifts \u00d7 hours \u00d7 60) before solving.\",\n      \"Labor costs are excluded from the objective function per the explicit formula provided. If labor is charged per minute of machine time, it should be deducted from the per-unit margin.\",\n      \"No minimum production requirements, setup costs, or supplier-specific constraints are modeled. The problem is treated as a deterministic linear programming (LP) relaxation that is later enforced as an integer program (MIP).\",\n      \"Max_Market_Capacity is treated as a hard upper bound on demand rather than a probabilistic forecast, simplifying the model to a deterministic resource allocation problem.\"\n    ]\n  }\n}\n```"
+    },
+    "modelling": {
+      "raw_text": "```json\n{\n  \"sets\": {\n    \"description\": \"Set of all products (SKUs) to be considered in the optimization.\",\n    \"notation\": \"$I = \\\\{1, 2, \\\\dots, n\\\\}$\",\n    \"csv_column\": \"Product_SKU\"\n  },\n  \"parameters\": {\n    \"profit_per_unit\": {\n      \"description\": \"Profit margin per unit for SKU $i$.\",\n      \"notation\": \"$p_i$\",\n      \"calculation\": \"Sale_Price_Per_Unit - Material_Cost_Per_Unit\"\n    },\n    \"molding_time_per_unit\": {\n      \"description\": \"Molding time required per unit for SKU $i$.\",\n      \"notation\": \"$m_i$\",\n      \"csv_column\": \"Molding_Mins_Req\"\n    },\n    \"assembly_time_per_unit\": {\n      \"description\": \"Assembly time required per unit for SKU $i$.\",\n      \"notation\": \"$a_i$\",\n      \"csv_column\": \"Assembly_Mins_Req\"\n    },\n    \"max_market_capacity\": {\n      \"description\": \"Maximum market demand/capacity for SKU $i$.\",\n      \"notation\": \"$D_i$\",\n      \"csv_column\": \"Max_Market_Capacity\"\n    },\n    \"total_molding_capacity\": {\n      \"description\": \"Total available molding minutes.\",\n      \"notation\": \"$M_{total}$\",\n      \"value\": 15000\n    },\n    \"total_assembly_capacity\": {\n      \"description\": \"Total available assembly minutes.\",\n      \"notation\": \"$A_{total}$\",\n      \"value\": 12000\n    }\n  },\n  \"decision_variables\": {\n    \"description\": \"Production quantity for SKU $i$.\",\n    \"notation\": \"$x_i$\",\n    \"domain\": \"Integer $\\\\ge 0$\"\n  },\n  \"objective_function\": {\n    \"description\": \"Maximize total profit.\",\n    \"formula\": \"\\\\max Z = \\\\sum_{i \\\\in I} p_i x_i\"\n  },\n  \"constraints\": [\n    {\n      \"name\": \"Molding Capacity\",\n      \"formula\": \"\\\\sum_{i \\\\in I} m_i x_i \\\\le M_{total}\"\n    },\n    {\n      \"name\": \"Assembly Capacity\",\n      \"formula\": \"\\\\sum_{i \\\\in I} a_i x_i \\\\le A_{total}\"\n    },\n    {\n      \"name\": \"Market Demand\",\n      \"formula\": \"x_i \\\\le D_i \\\\quad \\\\forall i \\\\in I\"\n    },\n    {\n      \"name\": \"Integrality and Non-negativity\",\n      \"formula\": \"x_i \\\\in \\\\mathbb{Z}_{\\\\ge 0} \\\\quad \\\\forall i \\\\in I\"\n    }\n  ]\n}\n```"
+    },
+    "preprocessing": {
+      "raw_text": "```python\nimport pandas as pd\nimport numpy as np\n\ndef load_and_prepare_model_parameters(csv_path: str = \"C:\\\\Users\\\\simon\\\\AppData\\\\Local\\\\Temp\\\\tmp4ep64_6s.csv\"):\n    \"\"\"\n    Load CSV data and extract model parameters for the product mix optimization problem.\n    \n    Returns:\n        dict: Dictionary containing all model parameters indexed by Product_SKU\n    \"\"\"\n    # Load the CSV file\n    df = pd.read_csv(csv_path)\n    \n    # Define assumed capacity values (these should be replaced with actual values)\n    TOTAL_MOLDING_CAPACITY = 15000  # minutes\n    TOTAL_ASSEMBLY_CAPACITY = 12000  # minutes\n    \n    # Extract parameters indexed by Product_SKU\n    skus = df['Product_SKU'].tolist()\n    \n    # Create dictionaries for each parameter\n    sale_prices = dict(zip(skus, df['Sale_Price_Per_Unit'].tolist()))\n    material_costs = dict(zip(skus, df['Material_Cost_Per_Unit'].tolist()))\n    molding_mins = dict(zip(skus, df['Molding_Mins_Req'].tolist()))\n    assembly_mins = dict(zip(skus, df['Assembly_Mins_Req'].tolist()))\n    market_capacities = dict(zip(skus, df['Max_Market_Capacity'].tolist()))\n    \n    # Calculate profit margin per unit for each SKU\n    profit_margins = {sku: sale_prices[sku] - material_costs[sku] for sku in skus}\n    \n    # Assemble all parameters into a single dictionary\n    model_params = {\n        'skus': skus,\n        'sale_prices': sale_prices,\n        'material_costs': material_costs,\n        'molding_mins': molding_mins,\n        'assembly_mins': assembly_mins,\n        'market_capacities': market_capacities,\n        'profit_margins': profit_margins,\n        'total_molding_capacity': TOTAL_MOLDING_CAPACITY,\n        'total_assembly_capacity': TOTAL_ASSEMBLY_CAPACITY,\n        'num_skus': len(skus)\n    }\n    \n    return model_params\n\n# Example usage\nif __name__ == \"__main__\":\n    params = load_and_prepare_model_parameters()\n    \n    # Print summary\n    print(f\"Number of SKUs: {params['num_skus']}\")\n    print(f\"Total Molding Capacity: {params['total_molding_capacity']} minutes\")\n    print(f\"Total Assembly Capacity: {params['total_assembly_capacity']} minutes\")\n    print(f\"\\nFirst 5 SKUs:\")\n    for i, sku in enumerate(params['skus'][:5]):\n        print(f\"  {sku}:\")\n        print(f\"    Sale Price: ${params['sale_prices'][sku]:.2f}\")\n        print(f\"    Material Cost: ${params['material_costs'][sku]:.2f}\")\n        print(f\"    Profit Margin: ${params['profit_margins'][sku]:.2f}\")\n        print(f\"    Molding Mins: {params['molding_mins'][sku]:.1f}\")\n        print(f\"    Assembly Mins: {params['assembly_mins'][sku]:.1f}\")\n        print(f\"    Max Market Capacity: {params['market_capacities'][sku]}\")\n```"
+    },
+    "scripting": {
+      "raw_text": "```python\nimport sys\nimport os\n\n# Add the site-packages path where pulp is installed (if needed)\nsite_packages = r'C:\\Users\\simon\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages'\nif site_packages not in sys.path:\n    sys.path.insert(0, site_packages)\n\nimport pulp\nimport pandas as pd\n\n# ============================================================\n# 1. Load data from CSV\n# ============================================================\ncsv_path = r'C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv'\ndf = pd.read_csv(csv_path)\n\n# Calculate profit per unit\ndf['Profit_Per_Unit'] = df['Sale_Price_Per_Unit'] - df['Material_Cost_Per_Unit']\n\n# ============================================================\n# 2. Create the PuLP problem (maximization)\n# ============================================================\nprob = pulp.LpProblem(\"ProductMix\", pulp.LpMaximize)\n\n# ============================================================\n# 3. Define decision variables (one per SKU, integer, >= 0)\n# ============================================================\nx = pulp.LpVariable.dicts(\"Prod\", df['Product_SKU'], lowBound=0, cat='Integer')\n\n# ============================================================\n# 4. Set the objective function (maximize total profit)\n# ============================================================\nprob += pulp.lpSum(\n    df.loc[df['Product_SKU'] == i, 'Profit_Per_Unit'].values[0] * x[i]\n    for i in df['Product_SKU']\n), \"TotalProfit\"\n\n# ============================================================\n# 5. Add molding time constraint\n# ============================================================\nprob += pulp.lpSum(\n    df.loc[df['Product_SKU'] == i, 'Molding_Mins_Req'].values[0] * x[i]\n    for i in df['Product_SKU']\n) <= 15000, \"MoldingCapacity\"\n\n# ============================================================\n# 6. Add assembly time constraint\n# ============================================================\nprob += pulp.lpSum(\n    df.loc[df['Product_SKU'] == i, 'Assembly_Mins_Req'].values[0] * x[i]\n    for i in df['Product_SKU']\n) <= 12000, \"AssemblyCapacity\"\n\n# ============================================================\n# 7. Add market capacity constraints per SKU\n# ============================================================\nfor i in df['Product_SKU']:\n    prob += x[i] <= df.loc[df['Product_SKU'] == i, 'Max_Market_Capacity'].values[0], f\"Market_{i}\"\n\n# ============================================================\n# 8. Solve the problem\n# ============================================================\nprob.solve()\n\n# ============================================================\n# 9. Print results\n# ============================================================\nprint(f\"Status: {pulp.LpStatus[prob.status]}\")\nprint(f\"\\nOptimal Production Plan:\")\ntotal_profit = 0\nfor i in df['Product_SKU']:\n    qty = pulp.value(x[i])\n    if qty > 0:\n        profit = qty * df.loc[df['Product_SKU'] == i, 'Profit_Per_Unit'].values[0]\n        total_profit += profit\n        print(f\"  {i}: {int(qty)} units (profit: ${profit:.2f})\")\n\nprint(f\"\\nTotal Profit: ${total_profit:.2f}\")\n\n# Resource usage\nmolding_used = sum(\n    df.loc[df['Product_SKU'] == i, 'Molding_Mins_Req'].values[0] * pulp.value(x[i])\n    for i in df['Product_SKU']\n)\nassembly_used = sum(\n    df.loc[df['Product_SKU'] == i, 'Assembly_Mins_Req'].values[0] * pulp.value(x[i])\n    for i in df['Product_SKU']\n)\nprint(f\"\\nResource Usage:\")\nprint(f\"  Molding: {molding_used:.1f} / 15000 minutes\")\nprint(f\"  Assembly: {assembly_used:.1f} / 12000 minutes\")\n```",
+      "code": "import pulp\nimport pandas as pd\n\n# === Configuration ===\nCSV_PATH = r\"C:\\Users\\simon\\AppData\\Local\\Temp\\tmp4ep64_6s.csv\"\nTOTAL_MOLDING_CAPACITY = 15000  # minutes (assumed, as per use case analysis)\nTOTAL_ASSEMBLY_CAPACITY = 12000  # minutes (assumed, as per use case analysis)\n\ndef main():\n    # 1. Load and validate data\n    print(\"Loading data...\")\n    df = pd.read_csv(CSV_PATH)\n    \n    required_cols = ['Product_SKU', 'Sale_Price_Per_Unit', 'Material_Cost_Per_Unit', \n                     'Molding_Mins_Req', 'Assembly_Mins_Req', 'Max_Market_Capacity']\n    assert all(col in df.columns for col in required_cols), f\"Missing required columns: {set(required_cols) - set(df.columns)}\"\n    \n    # 2. Prepare parameters as dictionaries for efficient access (avoids repeated df.loc lookups)\n    skus = df['Product_SKU'].tolist()\n    profit_per_unit = dict(zip(skus, df['Sale_Price_Per_Unit'] - df['Material_Cost_Per_Unit']))\n    molding_mins = dict(zip(skus, df['Molding_Mins_Req']))\n    assembly_mins = dict(zip(skus, df['Assembly_Mins_Req']))\n    market_capacity = dict(zip(skus, df['Max_Market_Capacity']))\n    \n    print(f\"Loaded {len(skus)} SKUs.\")\n    \n    # 3. Create the optimization problem (MILP)\n    prob = pulp.LpProblem(\"ProductMixOptimization\", pulp.LpMaximize)\n    \n    # 4. Define decision variables\n    # x[i] represents the production quantity for SKU i\n    x = pulp.LpVariable.dicts(\"Prod\", skus, lowBound=0, cat='Integer')\n    \n    # 5. Set the objective function: Maximize Total Profit\n    # Profit = (Sale Price - Material Cost) * Quantity\n    prob += pulp.lpSum(profit_per_unit[i] * x[i] for i in skus), \"TotalProfit\"\n    \n    # 6. Add constraints\n    # Molding capacity constraint\n    prob += pulp.lpSum(molding_mins[i] * x[i] for i in skus) <= TOTAL_MOLDING_CAPACITY, \"MoldingCapacity\"\n    \n    # Assembly capacity constraint\n    prob += pulp.lpSum(assembly_mins[i] * x[i] for i in skus) <= TOTAL_ASSEMBLY_CAPACITY, \"AssemblyCapacity\"\n    \n    # Market demand constraints (upper bound per SKU)\n    for i in skus:\n        prob += x[i] <= market_capacity[i], f\"MarketCap_{i}\"\n        \n    # 7. Solve the problem\n    print(\"Solving optimization problem...\")\n    prob.solve()\n    \n    # 8. Print results\n    print(f\"\\n--- Optimization Results ---\")\n    print(f\"Status: {pulp.LpStatus[prob.status]}\")\n    print(f\"Objective Value (Total Profit): ${pulp.value(prob.objective):,.2f}\")\n    \n    if prob.status == pulp.LpStatusOptimal:\n        print(\"\\nOptimal Production Plan:\")\n        total_molding_used = 0\n        total_assembly_used = 0\n        \n        for i in skus:\n            qty = pulp.value(x[i])\n            if qty > 0:\n                profit = qty * profit_per_unit[i]\n                total_molding_used += molding_mins[i] * qty\n                total_assembly_used += assembly_mins[i] * qty\n                print(f\"  {i}: {int(qty)} units (Profit: ${profit:,.2f})\")\n                \n        print(f\"\\nResource Usage:\")\n        print(f\"  Molding: {total_molding_used:,.1f} / {TOTAL_MOLDING_CAPACITY} minutes\")\n        print(f\"  Assembly: {total_assembly_used:,.1f} / {TOTAL_ASSEMBLY_CAPACITY} minutes\")\n    else:\n        print(\"No optimal solution found.\")\n\nif __name__ == \"__main__\":\n    main()",
+      "output_schema": {
+        "objective_value": "float (total profit)",
+        "production_plan": {
+          "quantity": "integer",
+          "sku": "string"
+        },
+        "resource_usage": {
+          "assembly_minutes": "float",
+          "molding_minutes": "float"
+        },
+        "status": "string (e.g., 'Optimal', 'Infeasible')"
+      },
+      "successful_implementation": true
+    }
+  }
+}
