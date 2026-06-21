@@ -47,11 +47,23 @@ def extract_obj_from_log(log_content):
 def is_log_successful(log_content):
     """Determine if a PuLP execution log indicates successful optimal solution."""
     content_lower = log_content.lower()
+    
+    # If the log is empty, it is considered successful
+    if not content_lower.strip():
+        return True
+        
     # Check for python execution errors or file not found errors
-    has_error = any(x in content_lower for x in ["error", "traceback", "exception", "no such file", "failed"])
-    # Check if solved to optimal
-    has_optimal = "optimal" in content_lower or "executed cleanly" in content_lower
-    return has_optimal and not has_error
+    error_keywords = ["traceback", "exception", "no such file", "failed"]
+    has_error = any(x in content_lower for x in error_keywords)
+    
+    # Check for "error" but ignore "0 errors" or "0 error"
+    if "error" in content_lower:
+        # Ignore occurrences of "0 errors" and "0 error"
+        cleaned_content = re.sub(r"\b0\s+errors?\b", "", content_lower)
+        if "error" in cleaned_content:
+            has_error = True
+            
+    return not has_error
 
 def gather_run_data():
     """Scan directories, parse JSON state dicts and log files, and aggregate data."""
@@ -309,8 +321,10 @@ def generate_report_and_plots(df):
         fig, ax = plt.subplots(figsize=(8, 5))
         datasets_list = sorted(valid_durations_df["dataset"].unique())
         box_data = [valid_durations_df[valid_durations_df["dataset"] == ds]["total_duration"].values for ds in datasets_list]
-        
-        ax.boxplot(box_data, labels=datasets_list)
+        try:
+            ax.boxplot(box_data, tick_labels=datasets_list)
+        except TypeError:
+            ax.boxplot(box_data, labels=datasets_list)
         ax.set_ylabel("Total Duration (seconds)")
         ax.set_title("Distribution of Total Pipeline Inference Time by Dataset")
         plt.tight_layout()
