@@ -482,9 +482,9 @@
   "execution_metadata": [
     {
       "agent_name": "initialize",
-      "started_at": "2026-06-21T20:59:04.196078+00:00",
-      "completed_at": "2026-06-21T20:59:04.570392+00:00",
-      "duration_seconds": 0.37430310249328613,
+      "started_at": "2026-06-21T23:11:15.775661+00:00",
+      "completed_at": "2026-06-21T23:11:16.134937+00:00",
+      "duration_seconds": 0.35926294326782227,
       "status": "ok",
       "tool_calls": [],
       "notes": [],
@@ -494,9 +494,9 @@
     },
     {
       "agent_name": "use_case_agent",
-      "started_at": "2026-06-21T20:59:04.571090+00:00",
-      "completed_at": "2026-06-21T20:59:22.044866+00:00",
-      "duration_seconds": 17.47372579574585,
+      "started_at": "2026-06-21T23:11:16.135418+00:00",
+      "completed_at": "2026-06-21T23:11:33.483993+00:00",
+      "duration_seconds": 17.348532915115356,
       "status": "ok",
       "tool_calls": [
         "get_csv_preview",
@@ -514,9 +514,9 @@
     },
     {
       "agent_name": "modeling_agent",
-      "started_at": "2026-06-21T20:59:22.046829+00:00",
-      "completed_at": "2026-06-21T21:00:29.044070+00:00",
-      "duration_seconds": 66.99721503257751,
+      "started_at": "2026-06-21T23:11:33.486414+00:00",
+      "completed_at": "2026-06-21T23:12:40.320357+00:00",
+      "duration_seconds": 66.83392095565796,
       "status": "ok",
       "tool_calls": [
         "ModellingRecommendation"
@@ -531,9 +531,9 @@
     },
     {
       "agent_name": "parameter_estimation_agent",
-      "started_at": "2026-06-21T21:00:29.045887+00:00",
-      "completed_at": "2026-06-21T21:01:15.454249+00:00",
-      "duration_seconds": 46.40833783149719,
+      "started_at": "2026-06-21T23:12:40.322326+00:00",
+      "completed_at": "2026-06-21T23:13:26.310788+00:00",
+      "duration_seconds": 45.9884250164032,
       "status": "ok",
       "tool_calls": [
         "ParameterEstimationRecommendation"
@@ -548,9 +548,9 @@
     },
     {
       "agent_name": "preprocessing_agent",
-      "started_at": "2026-06-21T21:01:15.455557+00:00",
-      "completed_at": "2026-06-21T21:02:21.963928+00:00",
-      "duration_seconds": 66.50835680961609,
+      "started_at": "2026-06-21T23:13:26.313024+00:00",
+      "completed_at": "2026-06-21T23:16:48.121648+00:00",
+      "duration_seconds": 201.808531999588,
       "status": "ok",
       "tool_calls": [
         "get_mathematical_model",
@@ -569,9 +569,9 @@
     },
     {
       "agent_name": "scripting_agent",
-      "started_at": "2026-06-21T21:02:21.965030+00:00",
-      "completed_at": "2026-06-21T21:02:58.613823+00:00",
-      "duration_seconds": 36.648781061172485,
+      "started_at": "2026-06-21T23:16:48.127985+00:00",
+      "completed_at": "2026-06-21T23:17:24.920795+00:00",
+      "duration_seconds": 36.7927987575531,
       "status": "ok",
       "tool_calls": [
         "ScriptingRecommendation"
