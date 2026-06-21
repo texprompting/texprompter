@@ -1,0 +1,816 @@
+{
+  "csv_file_path": "/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_easy.csv",
+  "preview_rows": 5,
+  "status": "ok",
+  "input_schema_payload": {
+    "source": {
+      "csv_file_name": "optimization_pipeline_test_easy.csv",
+      "csv_file_path": "/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_easy.csv",
+      "num_preview_rows": 5
+    },
+    "shape": {
+      "rows": 50,
+      "columns": 8
+    },
+    "columns": [
+      "Product_ID",
+      "Profit_Per_Unit",
+      "Machine_A_Hours_Req",
+      "Machine_B_Hours_Req",
+      "Labor_Hours_Req",
+      "Raw_Material_Units_Req",
+      "Min_Production_Requirement",
+      "Max_Market_Demand"
+    ],
+    "dtypes": {
+      "Product_ID": "object",
+      "Profit_Per_Unit": "float64",
+      "Machine_A_Hours_Req": "float64",
+      "Machine_B_Hours_Req": "float64",
+      "Labor_Hours_Req": "float64",
+      "Raw_Material_Units_Req": "float64",
+      "Min_Production_Requirement": "int64",
+      "Max_Market_Demand": "int64"
+    },
+    "schema_mapping": {
+      "Product_ID": {
+        "symbol": "i",
+        "role": "Product index"
+      },
+      "Profit_Per_Unit": {
+        "symbol": "P_i",
+        "role": "Objective coefficient"
+      },
+      "Machine_A_Hours_Req": {
+        "symbol": "M_{Ai}",
+        "role": "Machine A coefficient"
+      },
+      "Machine_B_Hours_Req": {
+        "symbol": "M_{Bi}",
+        "role": "Machine B coefficient"
+      },
+      "Labor_Hours_Req": {
+        "symbol": "L_i",
+        "role": "Labor coefficient"
+      },
+      "Raw_Material_Units_Req": {
+        "symbol": "R_i",
+        "role": "Raw material coefficient"
+      },
+      "Min_Production_Requirement": {
+        "symbol": "x_i^{\\min}",
+        "role": "Lower bound"
+      },
+      "Max_Market_Demand": {
+        "symbol": "D_i",
+        "role": "Upper bound"
+      }
+    },
+    "input_schema": [
+      {
+        "column_name": "Product_ID",
+        "dtype": "object",
+        "model_symbol": "i",
+        "role": "Product index"
+      },
+      {
+        "column_name": "Profit_Per_Unit",
+        "dtype": "float64",
+        "model_symbol": "P_i",
+        "role": "Objective coefficient"
+      },
+      {
+        "column_name": "Machine_A_Hours_Req",
+        "dtype": "float64",
+        "model_symbol": "M_{Ai}",
+        "role": "Machine A coefficient"
+      },
+      {
+        "column_name": "Machine_B_Hours_Req",
+        "dtype": "float64",
+        "model_symbol": "M_{Bi}",
+        "role": "Machine B coefficient"
+      },
+      {
+        "column_name": "Labor_Hours_Req",
+        "dtype": "float64",
+        "model_symbol": "L_i",
+        "role": "Labor coefficient"
+      },
+      {
+        "column_name": "Raw_Material_Units_Req",
+        "dtype": "float64",
+        "model_symbol": "R_i",
+        "role": "Raw material coefficient"
+      },
+      {
+        "column_name": "Min_Production_Requirement",
+        "dtype": "int64",
+        "model_symbol": "x_i^{\\min}",
+        "role": "Lower bound"
+      },
+      {
+        "column_name": "Max_Market_Demand",
+        "dtype": "int64",
+        "model_symbol": "D_i",
+        "role": "Upper bound"
+      }
+    ],
+    "sample_data": "| Product_ID | Profit_Per_Unit | Machine_A_Hours_Req | Machine_B_Hours_Req | Labor_Hours_Req | Raw_Material_Units_Req | Min_Production_Requirement | Max_Market_Demand |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| PROD_001 | 11.62 | 0.08 | 0.4 | 2.45 | 4 | 0 | 224 |\n| PROD_002 | 41.03 | 2.37 | 1.85 | 3.51 | 9 | 0 | 81 |\n| PROD_003 | 30.31 | 2.32 | 0.48 | 2.81 | 7 | 20 | 221 |\n| PROD_004 | 47.13 | 0.3 | 0.85 | 2.77 | 2 | 0 | 269 |\n| PROD_005 | 50.78 | 0.67 | 2.6 | 4.02 | 9 | 0 | 75 |"
+  },
+  "use_case": {
+    "use_case_name": "Product Mix Profit Maximization",
+    "business_goal": "Maximize total profit by determining the optimal production quantity for each product while satisfying machine capacity, labor capacity, raw material availability, minimum production requirements, and maximum market demand constraints.",
+    "objective_direction": "min",
+    "objective_variable": "Maximize total profit by determining the optimal production quantity for each product while satisfying machine capacity, labor capacity, raw material availability, minimum production requirements, and maximum market demand constraints.",
+    "decision_variables": [
+      "Production_Quantity"
+    ],
+    "required_columns": [
+      "Product_ID",
+      "Profit_Per_Unit",
+      "Machine_A_Hours_Req",
+      "Machine_B_Hours_Req",
+      "Labor_Hours_Req",
+      "Raw_Material_Units_Req",
+      "Min_Production_Requirement",
+      "Max_Market_Demand"
+    ],
+    "constraints_to_consider": [],
+    "assumptions": [],
+    "rationale": "The dataset contains product-level details including profit per unit, resource requirements (Machine A, Machine B, Labor, Raw Materials), and demand bounds (minimum production and maximum market demand). This is a classic product mix optimization problem where we want to determine how much of each product to produce to maximize total profit under resource constraints."
+  },
+  "modelling": {
+    "col_names_used": [
+      "Product_ID",
+      "Profit_Per_Unit",
+      "Machine_A_Hours_Req",
+      "Machine_B_Hours_Req",
+      "Labor_Hours_Req",
+      "Raw_Material_Units_Req",
+      "Min_Production_Requirement",
+      "Max_Market_Demand"
+    ],
+    "parameters": [
+      {
+        "symbol": "P",
+        "description": "Set of products"
+      },
+      {
+        "symbol": "R_p",
+        "description": "Profit per unit of product p"
+      },
+      {
+        "symbol": "A_p",
+        "description": "Machine A hours required per unit of product p"
+      },
+      {
+        "symbol": "B_p",
+        "description": "Machine B hours required per unit of product p"
+      },
+      {
+        "symbol": "L_p",
+        "description": "Labor hours required per unit of product p"
+      },
+      {
+        "symbol": "M_p",
+        "description": "Raw material units required per unit of product p"
+      },
+      {
+        "symbol": "Min_p",
+        "description": "Minimum production requirement for product p"
+      },
+      {
+        "symbol": "Max_p",
+        "description": "Maximum market demand for product p"
+      },
+      {
+        "symbol": "C_A",
+        "description": "Total available capacity for Machine A (hours)"
+      },
+      {
+        "symbol": "C_B",
+        "description": "Total available capacity for Machine B (hours)"
+      },
+      {
+        "symbol": "C_L",
+        "description": "Total available labor capacity (hours)"
+      },
+      {
+        "symbol": "C_M",
+        "description": "Total available raw material capacity (units)"
+      }
+    ],
+    "variables": [
+      {
+        "variable": "x_p",
+        "meaning": "Production quantity of product p"
+      }
+    ],
+    "minimizing_problem": false,
+    "objective_function": "\\\\sum_{p \\\\in P} R_p x_p",
+    "constraint_functions": [
+      "\\\\sum_{p \\\\in P} A_p x_p \\\\le 11000 (C_A)",
+      "\\\\sum_{p \\\\in P} B_p x_p \\\\le 13000 (C_B)",
+      "\\\\sum_{p \\\\in P} L_p x_p \\\\le 22000 (C_L)",
+      "\\\\sum_{p \\\\in P} M_p x_p \\\\le 65000 (C_M)",
+      "x_p \\\\ge Min_p \\\\quad \\\\forall p \\\\in P",
+      "x_p \\\\le Max_p \\\\quad \\\\forall p \\\\in P",
+      "x_p \\\\ge 0 \\\\quad \\\\forall p \\\\in P"
+    ],
+    "explanation_of_ILP": [
+      "The objective function maximizes the total profit generated across all produced products.",
+      "Constraint 1 limits the total Machine A hours used by production to the available capacity.",
+      "Constraint 2 limits the total Machine B hours used by production to the available capacity.",
+      "Constraint 3 limits the total labor hours used by production to the available labor capacity.",
+      "Constraint 4 limits the total raw material units used by production to the available raw material capacity.",
+      "Constraint 5 ensures that the production quantity for each product meets its minimum production requirement.",
+      "Constraint 6 ensures that the production quantity for each product does not exceed its maximum market demand.",
+      "Constraint 7 ensures that the production quantities are non-negative."
+    ]
+  },
+  "parameter_estimation": {
+    "parameter_values": [
+      {
+        "symbol": "P",
+        "value": 50.0
+      },
+      {
+        "symbol": "R_p",
+        "value": 47.0324
+      },
+      {
+        "symbol": "A_p",
+        "value": 1.711
+      },
+      {
+        "symbol": "B_p",
+        "value": 2.0072
+      },
+      {
+        "symbol": "L_p",
+        "value": 3.3422
+      },
+      {
+        "symbol": "M_p",
+        "value": 10.08
+      },
+      {
+        "symbol": "Min_p",
+        "value": 5.8
+      },
+      {
+        "symbol": "Max_p",
+        "value": 258.78
+      },
+      {
+        "symbol": "C_A",
+        "value": 11000.0
+      },
+      {
+        "symbol": "C_B",
+        "value": 13000.0
+      },
+      {
+        "symbol": "C_L",
+        "value": 22000.0
+      },
+      {
+        "symbol": "C_M",
+        "value": 65000.0
+      }
+    ],
+    "parameter_rationales": [
+      {
+        "symbol": "P",
+        "rationale": "Number of unique products in the dataset."
+      },
+      {
+        "symbol": "R_p",
+        "rationale": "Mean profit per unit across all products in the dataset."
+      },
+      {
+        "symbol": "A_p",
+        "rationale": "Mean Machine A hours required per unit across all products."
+      },
+      {
+        "symbol": "B_p",
+        "rationale": "Mean Machine B hours required per unit across all products."
+      },
+      {
+        "symbol": "L_p",
+        "rationale": "Mean labor hours required per unit across all products."
+      },
+      {
+        "symbol": "M_p",
+        "rationale": "Mean raw material units required per unit across all products."
+      },
+      {
+        "symbol": "Min_p",
+        "rationale": "Mean minimum production requirement across all products."
+      },
+      {
+        "symbol": "Max_p",
+        "rationale": "Mean maximum market demand across all products."
+      },
+      {
+        "symbol": "C_A",
+        "rationale": "Total available capacity for Machine A, estimated at approximately 50% of the total hours required to meet maximum demand for all products (50 * 258.78 * 1.711 * 0.5 ≈ 11,000)."
+      },
+      {
+        "symbol": "C_B",
+        "rationale": "Total available capacity for Machine B, estimated at approximately 50% of the total hours required to meet maximum demand for all products (50 * 258.78 * 2.0072 * 0.5 ≈ 13,000)."
+      },
+      {
+        "symbol": "C_L",
+        "rationale": "Total available labor capacity, estimated at approximately 50% of the total labor hours required to meet maximum demand for all products (50 * 258.78 * 3.3422 * 0.5 ≈ 22,000)."
+      },
+      {
+        "symbol": "C_M",
+        "rationale": "Total available raw material capacity, estimated at approximately 50% of the total raw material units required to meet maximum demand for all products (50 * 258.78 * 10.08 * 0.5 ≈ 65,000)."
+      }
+    ],
+    "updated_constraint_functions": [
+      "\\\\sum_{p \\\\in P} A_p x_p \\\\le 11000 (C_A)",
+      "\\\\sum_{p \\\\in P} B_p x_p \\\\le 13000 (C_B)",
+      "\\\\sum_{p \\\\in P} L_p x_p \\\\le 22000 (C_L)",
+      "\\\\sum_{p \\\\in P} M_p x_p \\\\le 65000 (C_M)",
+      "x_p \\\\ge Min_p \\\\quad \\\\forall p \\\\in P",
+      "x_p \\\\le Max_p \\\\quad \\\\forall p \\\\in P",
+      "x_p \\\\ge 0 \\\\quad \\\\forall p \\\\in P"
+    ],
+    "updated_objective_function": "\\\\sum_{p \\\\in P} R_p x_p"
+  },
+  "preprocessing": {
+    "input_schema_payload": {
+      "source": {
+        "csv_file_name": "optimization_pipeline_test_easy.csv",
+        "csv_file_path": "/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_easy.csv",
+        "num_preview_rows": 5
+      },
+      "shape": {
+        "rows": 50,
+        "columns": 8
+      },
+      "columns": [
+        "Product_ID",
+        "Profit_Per_Unit",
+        "Machine_A_Hours_Req",
+        "Machine_B_Hours_Req",
+        "Labor_Hours_Req",
+        "Raw_Material_Units_Req",
+        "Min_Production_Requirement",
+        "Max_Market_Demand"
+      ],
+      "dtypes": {
+        "Product_ID": "object",
+        "Profit_Per_Unit": "float64",
+        "Machine_A_Hours_Req": "float64",
+        "Machine_B_Hours_Req": "float64",
+        "Labor_Hours_Req": "float64",
+        "Raw_Material_Units_Req": "float64",
+        "Min_Production_Requirement": "int64",
+        "Max_Market_Demand": "int64"
+      },
+      "schema_mapping": {
+        "Product_ID": {
+          "symbol": "i",
+          "role": "Product index"
+        },
+        "Profit_Per_Unit": {
+          "symbol": "P_i",
+          "role": "Objective coefficient"
+        },
+        "Machine_A_Hours_Req": {
+          "symbol": "M_{Ai}",
+          "role": "Machine A coefficient"
+        },
+        "Machine_B_Hours_Req": {
+          "symbol": "M_{Bi}",
+          "role": "Machine B coefficient"
+        },
+        "Labor_Hours_Req": {
+          "symbol": "L_i",
+          "role": "Labor coefficient"
+        },
+        "Raw_Material_Units_Req": {
+          "symbol": "R_i",
+          "role": "Raw material coefficient"
+        },
+        "Min_Production_Requirement": {
+          "symbol": "x_i^{\\min}",
+          "role": "Lower bound"
+        },
+        "Max_Market_Demand": {
+          "symbol": "D_i",
+          "role": "Upper bound"
+        }
+      },
+      "input_schema": [
+        {
+          "column_name": "Product_ID",
+          "dtype": "object",
+          "model_symbol": "i",
+          "role": "Product index"
+        },
+        {
+          "column_name": "Profit_Per_Unit",
+          "dtype": "float64",
+          "model_symbol": "P_i",
+          "role": "Objective coefficient"
+        },
+        {
+          "column_name": "Machine_A_Hours_Req",
+          "dtype": "float64",
+          "model_symbol": "M_{Ai}",
+          "role": "Machine A coefficient"
+        },
+        {
+          "column_name": "Machine_B_Hours_Req",
+          "dtype": "float64",
+          "model_symbol": "M_{Bi}",
+          "role": "Machine B coefficient"
+        },
+        {
+          "column_name": "Labor_Hours_Req",
+          "dtype": "float64",
+          "model_symbol": "L_i",
+          "role": "Labor coefficient"
+        },
+        {
+          "column_name": "Raw_Material_Units_Req",
+          "dtype": "float64",
+          "model_symbol": "R_i",
+          "role": "Raw material coefficient"
+        },
+        {
+          "column_name": "Min_Production_Requirement",
+          "dtype": "int64",
+          "model_symbol": "x_i^{\\min}",
+          "role": "Lower bound"
+        },
+        {
+          "column_name": "Max_Market_Demand",
+          "dtype": "int64",
+          "model_symbol": "D_i",
+          "role": "Upper bound"
+        }
+      ],
+      "sample_data": "| Product_ID | Profit_Per_Unit | Machine_A_Hours_Req | Machine_B_Hours_Req | Labor_Hours_Req | Raw_Material_Units_Req | Min_Production_Requirement | Max_Market_Demand |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| PROD_001 | 11.62 | 0.08 | 0.4 | 2.45 | 4 | 0 | 224 |\n| PROD_002 | 41.03 | 2.37 | 1.85 | 3.51 | 9 | 0 | 81 |\n| PROD_003 | 30.31 | 2.32 | 0.48 | 2.81 | 7 | 20 | 221 |\n| PROD_004 | 47.13 | 0.3 | 0.85 | 2.77 | 2 | 0 | 269 |\n| PROD_005 | 50.78 | 0.67 | 2.6 | 4.02 | 9 | 0 | 75 |"
+    },
+    "mapper_script": "import pandas as pd\n\n# Load the CSV file\ndf = pd.read_csv('optimization_pipeline_test_easy.csv')\n\n# Define the set of products\nP = df['Product_ID'].tolist()\n\n# Define parameters as dictionaries indexed by Product_ID\nR = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()\nA = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()\nB = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()\nL = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()\nM = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()\nMin = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()\nMax = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()\n\n# Define capacity constants\nCAP_A = 11000\nCAP_B = 13000\nCAP_L = 22000\nCAP_M = 65000",
+    "mapping_notes": [
+      "Product_ID maps to the set of products P.",
+      "Profit_Per_Unit maps to the parameter R_p, representing the profit per unit of product p.",
+      "Machine_A_Hours_Req maps to the parameter A_p, representing the Machine A hours required per unit of product p.",
+      "Machine_B_Hours_Req maps to the parameter B_p, representing the Machine B hours required per unit of product p.",
+      "Labor_Hours_Req maps to the parameter L_p, representing the labor hours required per unit of product p.",
+      "Raw_Material_Units_Req maps to the parameter M_p, representing the raw material units required per unit of product p.",
+      "Min_Production_Requirement maps to the parameter Min_p, representing the minimum production requirement for product p.",
+      "Max_Market_Demand maps to the parameter Max_p, representing the maximum market demand for product p.",
+      "Load the CSV file 'optimization_pipeline_test_easy.csv' using pandas.",
+      "Extract the unique list of Product_IDs to define the set of products P.",
+      "Map each product's attributes (Profit_Per_Unit, Machine_A_Hours_Req, Machine_B_Hours_Req, Labor_Hours_Req, Raw_Material_Units_Req, Min_Production_Requirement, Max_Market_Demand) to dictionaries indexed by Product_ID.",
+      "Define the capacity constants for Machine A, Machine B, Labor, and Raw Materials."
+    ],
+    "assumptions": [
+      "The CSV file is located in the current working directory or accessible via the path 'optimization_pipeline_test_easy.csv'.",
+      "All numeric columns contain valid, non-null values.",
+      "The capacities for Machine A, Machine B, Labor, and Raw Materials are fixed constants as specified in the mathematical model (11000, 13000, 22000, and 65000 respectively)."
+    ]
+  },
+  "scripting": {
+    "code": "import pandas as pd\nimport pulp\nfrom typing import Any\n\ndef solve_model(csv_path: str) -> dict[str, Any]:\n    # Load the CSV file\n    df = pd.read_csv(csv_path)\n\n    # Define the set of products\n    P = df['Product_ID'].tolist()\n\n    # Define parameters as dictionaries indexed by Product_ID\n    R = df.set_index('Product_ID')['Profit_Per_Unit'].to_dict()\n    A = df.set_index('Product_ID')['Machine_A_Hours_Req'].to_dict()\n    B = df.set_index('Product_ID')['Machine_B_Hours_Req'].to_dict()\n    L = df.set_index('Product_ID')['Labor_Hours_Req'].to_dict()\n    M = df.set_index('Product_ID')['Raw_Material_Units_Req'].to_dict()\n    Min = df.set_index('Product_ID')['Min_Production_Requirement'].to_dict()\n    Max = df.set_index('Product_ID')['Max_Market_Demand'].to_dict()\n\n    # Define capacity constants\n    CAP_A = 11000\n    CAP_B = 13000\n    CAP_L = 22000\n    CAP_M = 65000\n\n    # Initialize the model (Maximizing profit)\n    model = pulp.LpProblem(\"Maximize_Profit\", pulp.LpMaximize)\n\n    # Decision variables\n    x = {}\n    for p in P:\n        lb = max(0.0, float(Min[p]))\n        ub = float(Max[p])\n        x[p] = pulp.LpVariable(f\"x_{p}\", lowBound=lb, upBound=ub, cat=pulp.LpContinuous)\n\n    # Objective function\n    model += pulp.lpSum(R[p] * x[p] for p in P), \"Total_Profit\"\n\n    # Constraints\n    model += pulp.lpSum(A[p] * x[p] for p in P) <= CAP_A, \"Machine_A_Capacity\"\n    model += pulp.lpSum(B[p] * x[p] for p in P) <= CAP_B, \"Machine_B_Capacity\"\n    model += pulp.lpSum(L[p] * x[p] for p in P) <= CAP_L, \"Labor_Capacity\"\n    model += pulp.lpSum(M[p] * x[p] for p in P) <= CAP_M, \"Raw_Material_Capacity\"\n\n    # Solve the model\n    status = model.solve(pulp.PULP_CBC_CMD(msg=False))\n\n    # Prepare results\n    solution_status = pulp.LpStatus[status]\n    objective_value = pulp.value(model.objective) if solution_status == \"Optimal\" else None\n    decision_variables = {f\"x_{p}\": pulp.value(x[p]) for p in P} if solution_status == \"Optimal\" else {}\n\n    return {\n        \"solution_status\": solution_status,\n        \"objective_value\": objective_value,\n        \"decision_variables\": decision_variables,\n        \"solver_message\": f\"Model solved with status: {solution_status}\"\n    }\n\nif __name__ == \"__main__\":\n    # Default path for testing\n    csv_path = \"optimization_pipeline_test_easy.csv\"\n    try:\n        results = solve_model(csv_path)\n        print(\"Status:\", results[\"solution_status\"])\n        print(\"Objective Value:\", results[\"objective_value\"])\n    except Exception as e:\n        print(\"Error running model:\", e)\n",
+    "output_schema": {
+      "solution_status": "Optimal",
+      "objective_value": 378276.32345356204,
+      "decision_variables": {
+        "x_PROD_001": 0.0,
+        "x_PROD_002": 0.0,
+        "x_PROD_003": 20.0,
+        "x_PROD_004": 269.0,
+        "x_PROD_005": 75.0,
+        "x_PROD_006": 20.0,
+        "x_PROD_007": 119.0,
+        "x_PROD_008": 206.0,
+        "x_PROD_009": 20.0,
+        "x_PROD_010": 260.0,
+        "x_PROD_011": 20.0,
+        "x_PROD_012": 0.0,
+        "x_PROD_013": 427.0,
+        "x_PROD_014": 0.0,
+        "x_PROD_015": 105.0,
+        "x_PROD_016": 10.0,
+        "x_PROD_017": 0.0,
+        "x_PROD_018": 132.0,
+        "x_PROD_019": 330.0,
+        "x_PROD_020": 0.0,
+        "x_PROD_021": 435.0,
+        "x_PROD_022": 102.0,
+        "x_PROD_023": 457.0,
+        "x_PROD_024": 163.0,
+        "x_PROD_025": 61.0,
+        "x_PROD_026": 10.22957,
+        "x_PROD_027": 0.0,
+        "x_PROD_028": 167.0,
+        "x_PROD_029": 81.0,
+        "x_PROD_030": 3.3429682,
+        "x_PROD_031": 0.0,
+        "x_PROD_032": 0.0,
+        "x_PROD_033": 363.0,
+        "x_PROD_034": 380.05537,
+        "x_PROD_035": 52.0,
+        "x_PROD_036": 0.0,
+        "x_PROD_037": 209.0,
+        "x_PROD_038": 0.0,
+        "x_PROD_039": 10.0,
+        "x_PROD_040": 418.0,
+        "x_PROD_041": 20.0,
+        "x_PROD_042": 168.0,
+        "x_PROD_043": 10.0,
+        "x_PROD_044": 20.0,
+        "x_PROD_045": 208.0,
+        "x_PROD_046": 0.0,
+        "x_PROD_047": 394.0,
+        "x_PROD_048": 370.0,
+        "x_PROD_049": 0.0,
+        "x_PROD_050": 330.0
+      },
+      "solver_message": "Model solved with status: Optimal"
+    },
+    "successful_implementation": true,
+    "missing_info": [],
+    "additional_info": [
+      "The model maximizes total profit based on the provided parameters and capacity constraints.",
+      "Variable bounds are set using the Min_Production_Requirement and Max_Market_Demand columns."
+    ],
+    "solution_status": "Optimal",
+    "objective_value": 378276.32345356204,
+    "decision_variables": {
+      "x_PROD_001": 0.0,
+      "x_PROD_002": 0.0,
+      "x_PROD_003": 20.0,
+      "x_PROD_004": 269.0,
+      "x_PROD_005": 75.0,
+      "x_PROD_006": 20.0,
+      "x_PROD_007": 119.0,
+      "x_PROD_008": 206.0,
+      "x_PROD_009": 20.0,
+      "x_PROD_010": 260.0,
+      "x_PROD_011": 20.0,
+      "x_PROD_012": 0.0,
+      "x_PROD_013": 427.0,
+      "x_PROD_014": 0.0,
+      "x_PROD_015": 105.0,
+      "x_PROD_016": 10.0,
+      "x_PROD_017": 0.0,
+      "x_PROD_018": 132.0,
+      "x_PROD_019": 330.0,
+      "x_PROD_020": 0.0,
+      "x_PROD_021": 435.0,
+      "x_PROD_022": 102.0,
+      "x_PROD_023": 457.0,
+      "x_PROD_024": 163.0,
+      "x_PROD_025": 61.0,
+      "x_PROD_026": 10.22957,
+      "x_PROD_027": 0.0,
+      "x_PROD_028": 167.0,
+      "x_PROD_029": 81.0,
+      "x_PROD_030": 3.3429682,
+      "x_PROD_031": 0.0,
+      "x_PROD_032": 0.0,
+      "x_PROD_033": 363.0,
+      "x_PROD_034": 380.05537,
+      "x_PROD_035": 52.0,
+      "x_PROD_036": 0.0,
+      "x_PROD_037": 209.0,
+      "x_PROD_038": 0.0,
+      "x_PROD_039": 10.0,
+      "x_PROD_040": 418.0,
+      "x_PROD_041": 20.0,
+      "x_PROD_042": 168.0,
+      "x_PROD_043": 10.0,
+      "x_PROD_044": 20.0,
+      "x_PROD_045": 208.0,
+      "x_PROD_046": 0.0,
+      "x_PROD_047": 394.0,
+      "x_PROD_048": 370.0,
+      "x_PROD_049": 0.0,
+      "x_PROD_050": 330.0
+    },
+    "solver_message": "Model solved with status: Optimal"
+  },
+  "results_interpretation": {
+    "summary": "The optimization was successful, identifying an optimal product mix that maximizes total profit to $378,276.32. The plan strategically prioritizes high-margin products like PROD_023 and PROD_021 while meeting minimum production commitments for others and completely halting production of 13 unprofitable lines. This allocation perfectly balances resource capacities with market demand to maximize bottom-line performance.",
+    "objective_interpretation": "The optimal production plan achieves a maximum total profit of $378,276.32. This represents the most financially lucrative allocation of machine hours, labor, and raw materials possible under the current market demand and operational constraints.",
+    "key_decisions": [
+      "Prioritize high-volume production for top-performing products: PROD_023 (457 units), PROD_021 (435 units), PROD_013 (427 units), and PROD_040 (418 units).",
+      "Maintain minimum required production levels (typically 10 or 20 units) for products such as PROD_003, PROD_006, PROD_009, PROD_011, PROD_016, PROD_039, PROD_041, PROD_043, and PROD_044 to satisfy operational or contractual obligations.",
+      "Halt production entirely (0 units) for 13 products, including PROD_001, PROD_002, PROD_012, PROD_014, and PROD_020, as they are not economically viable under current resource constraints.",
+      "Produce fractional quantities for marginal products like PROD_034 (380.06 units), PROD_026 (10.23 units), and PROD_030 (3.34 units) to perfectly exhaust the remaining bottleneck resources."
+    ],
+    "actionable_recommendations": [
+      "Execute the production schedule prioritizing high-volume products, specifically allocating resources to produce 457 units of PROD_023, 435 units of PROD_021, and 427 units of PROD_013.",
+      "Halt production entirely for the 13 unprofitable products (including PROD_001, PROD_002, and PROD_012) to avoid wasting valuable machine and labor capacity.",
+      "Round fractional production targets to the nearest whole integer for shop-floor execution (e.g., round PROD_034 to 380 units, PROD_026 to 10 units, and PROD_030 to 3 units).",
+      "Investigate the binding resource bottlenecks (such as Machine A/B capacity or labor hours) to determine if overtime or temporary capacity expansion could unlock additional throughput for high-margin products.",
+      "Review the strategic necessity of the minimum production constraints for low-volume products (e.g., PROD_003 and PROD_006 at 20 units) to see if these requirements can be lowered or eliminated in future planning cycles."
+    ],
+    "constraints_analysis": "The presence of fractional production values (such as 380.06 for PROD_034, 10.23 for PROD_026, and 3.34 for PROD_030) indicates that one or more resource constraints (Machine A, Machine B, Labor, or Raw Materials) are fully binding. The solver was forced to scale back and fractionalize these marginal products to perfectly exhaust the remaining bottleneck capacity. Additionally, several products are sitting exactly at round numbers (like 10.0 or 20.0), indicating that minimum production requirements are actively binding and forcing the production of less profitable items.",
+    "sensitivity_notes": [
+      "The optimal product mix is highly sensitive to the relative profit margins of the products; a minor decrease in the price of a high-volume product like PROD_023 could shift production capacity to other items.",
+      "Because resource constraints are fully binding, any reduction in available machine hours or labor (e.g., due to maintenance or absenteeism) will directly reduce the total profit and alter the optimal mix of marginal products.",
+      "Changes in market demand caps or minimum production requirements will directly impact which products are prioritized and how much profit can be captured."
+    ],
+    "caveats": [
+      "The model treats production quantities as continuous variables, resulting in fractional targets (e.g., 380.06 units of PROD_034) which may need to be rounded for practical discrete manufacturing.",
+      "The analysis assumes static profit margins and constant resource consumption rates, ignoring potential setup times, batching constraints, or economies of scale.",
+      "The model does not account for demand uncertainty or potential supply chain disruptions, assuming all produced quantities up to the demand cap can be sold at the specified profit."
+    ]
+  },
+  "errors": [],
+  "traces": [
+    "initialize:ok",
+    "use_case:ok",
+    "modeling:ok",
+    "parameter_estimation:ok",
+    "preprocessing:ok",
+    "scripting:ok",
+    "results_interpretation:ok"
+  ],
+  "llm_artifacts": {
+    "prompts": {
+      "use_case": {
+        "short_name": "use_case",
+        "registry_name": "texprompter.use_case",
+        "requested_uri": "prompts:/texprompter.use_case@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "modeling": {
+        "short_name": "modeling",
+        "registry_name": "texprompter.modeling",
+        "requested_uri": "prompts:/texprompter.modeling@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "parameter_estimation": {
+        "short_name": "parameter_estimation",
+        "registry_name": "texprompter.parameter_estimation",
+        "requested_uri": "prompts:/texprompter.parameter_estimation@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "preprocessing": {
+        "short_name": "preprocessing",
+        "registry_name": "texprompter.preprocessing",
+        "requested_uri": "prompts:/texprompter.preprocessing@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "scripting": {
+        "short_name": "scripting",
+        "registry_name": "texprompter.scripting",
+        "requested_uri": "prompts:/texprompter.scripting@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "results_interpretation": {
+        "short_name": "results_interpretation",
+        "registry_name": "texprompter.results_interpretation",
+        "requested_uri": "prompts:/texprompter.results_interpretation@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      }
+    }
+  },
+  "execution_metadata": [
+    {
+      "agent_name": "initialize",
+      "started_at": "2026-06-21T21:27:48.575688+00:00",
+      "completed_at": "2026-06-21T21:27:48.972779+00:00",
+      "duration_seconds": 0.3970789909362793,
+      "status": "ok",
+      "tool_calls": [],
+      "notes": [],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "use_case_agent",
+      "started_at": "2026-06-21T21:27:48.973275+00:00",
+      "completed_at": "2026-06-21T21:27:57.749128+00:00",
+      "duration_seconds": 8.775828123092651,
+      "status": "ok",
+      "tool_calls": [
+        "get_csv_preview",
+        "get_column_names",
+        "get_basic_stats",
+        "ContextRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.use_case@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "modeling_agent",
+      "started_at": "2026-06-21T21:27:57.749898+00:00",
+      "completed_at": "2026-06-21T21:28:07.124307+00:00",
+      "duration_seconds": 9.374394178390503,
+      "status": "ok",
+      "tool_calls": [
+        "ModellingRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.modeling@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "parameter_estimation_agent",
+      "started_at": "2026-06-21T21:28:07.125172+00:00",
+      "completed_at": "2026-06-21T21:28:22.530375+00:00",
+      "duration_seconds": 15.40518307685852,
+      "status": "ok",
+      "tool_calls": [
+        "ParameterEstimationRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.parameter_estimation@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "preprocessing_agent",
+      "started_at": "2026-06-21T21:28:22.532001+00:00",
+      "completed_at": "2026-06-21T21:28:43.267441+00:00",
+      "duration_seconds": 20.735427141189575,
+      "status": "ok",
+      "tool_calls": [
+        "get_mathematical_model",
+        "get_input_schema_payload",
+        "get_use_case_recommendation",
+        "preview_csv",
+        "DataPreparation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.preprocessing@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "scripting_agent",
+      "started_at": "2026-06-21T21:28:43.268392+00:00",
+      "completed_at": "2026-06-21T21:28:57.992325+00:00",
+      "duration_seconds": 14.723912954330444,
+      "status": "ok",
+      "tool_calls": [
+        "ScriptingRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.scripting@latest",
+        "prompt_source=local_file",
+        "debug_milestones=csv_resolved,context_built,prompt_load_start,prompt_loaded,model_build_start,model_built,model_request_start,model_request_complete",
+        "debug_model=model=gemini-3.5-flash;max_retries=12"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "results_interpretation_agent",
+      "started_at": "2026-06-21T21:28:57.993469+00:00",
+      "completed_at": "2026-06-21T21:29:18.175436+00:00",
+      "duration_seconds": 20.18195080757141,
+      "status": "ok",
+      "tool_calls": [
+        "ResultsInterpretationRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.results_interpretation@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    }
+  ],
+  "skip_stages": [],
+  "retry_config": {},
+  "llm_config": {},
+  "initial_prompt": ""
+}

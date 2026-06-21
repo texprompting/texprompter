@@ -1,0 +1,860 @@
+{
+  "csv_file_path": "/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_medium.csv",
+  "preview_rows": 5,
+  "status": "ok",
+  "input_schema_payload": {
+    "source": {
+      "csv_file_name": "optimization_pipeline_test_medium.csv",
+      "csv_file_path": "/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_medium.csv",
+      "num_preview_rows": 5
+    },
+    "shape": {
+      "rows": 80,
+      "columns": 10
+    },
+    "columns": [
+      "Product_SKU",
+      "Color_Variant",
+      "Sale_Price_Per_Unit",
+      "Material_Cost_Per_Unit",
+      "Supplier_ID",
+      "Molding_Mins_Req",
+      "Assembly_Mins_Req",
+      "Previous_Quarter_Sales",
+      "Max_Market_Capacity",
+      "Customer_Rating_Avg"
+    ],
+    "dtypes": {
+      "Product_SKU": "object",
+      "Color_Variant": "object",
+      "Sale_Price_Per_Unit": "float64",
+      "Material_Cost_Per_Unit": "float64",
+      "Supplier_ID": "object",
+      "Molding_Mins_Req": "float64",
+      "Assembly_Mins_Req": "float64",
+      "Previous_Quarter_Sales": "int64",
+      "Max_Market_Capacity": "int64",
+      "Customer_Rating_Avg": "float64"
+    },
+    "schema_mapping": {
+      "Product_SKU": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Color_Variant": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Sale_Price_Per_Unit": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Material_Cost_Per_Unit": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Supplier_ID": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Molding_Mins_Req": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Assembly_Mins_Req": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Previous_Quarter_Sales": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Max_Market_Capacity": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      "Customer_Rating_Avg": {
+        "symbol": "unmapped",
+        "role": "No model mapping defined"
+      }
+    },
+    "input_schema": [
+      {
+        "column_name": "Product_SKU",
+        "dtype": "object",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Color_Variant",
+        "dtype": "object",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Sale_Price_Per_Unit",
+        "dtype": "float64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Material_Cost_Per_Unit",
+        "dtype": "float64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Supplier_ID",
+        "dtype": "object",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Molding_Mins_Req",
+        "dtype": "float64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Assembly_Mins_Req",
+        "dtype": "float64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Previous_Quarter_Sales",
+        "dtype": "int64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Max_Market_Capacity",
+        "dtype": "int64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      },
+      {
+        "column_name": "Customer_Rating_Avg",
+        "dtype": "float64",
+        "model_symbol": "unmapped",
+        "role": "No model mapping defined"
+      }
+    ],
+    "sample_data": "| Product_SKU | Color_Variant | Sale_Price_Per_Unit | Material_Cost_Per_Unit | Supplier_ID | Molding_Mins_Req | Assembly_Mins_Req | Previous_Quarter_Sales | Max_Market_Capacity | Customer_Rating_Avg |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| SKU-0001 | Neon Pink | 108.72 | 34.7 | SUP-B2 | 19.6 | 13.1 | 1110 | 544 | 4.7 |\n| SKU-0002 | Red | 96.57 | 45.98 | SUP-A1 | 15 | 24.9 | 466 | 265 | 3.2 |\n| SKU-0003 | Neon Pink | 64.93 | 29.38 | SUP-A1 | 7.6 | 13.4 | 2546 | 686 | 3.4 |\n| SKU-0004 | Blue | 85.72 | 27.21 | SUP-X9 | 12.2 | 19.2 | 693 | 493 | 3.5 |\n| SKU-0005 | Silver | 107.74 | 40.4 | SUP-A1 | 17.9 | 21.3 | 4197 | 425 | 5 |"
+  },
+  "use_case": {
+    "use_case_name": "Product Mix Optimization",
+    "business_goal": "Maximize total profit (revenue minus material cost) by determining the optimal production quantity for each Product_SKU, subject to molding and assembly time capacities and maximum market capacity constraints.",
+    "objective_direction": "min",
+    "objective_variable": "Maximize total profit (revenue minus material cost) by determining the optimal production quantity for each Product_SKU, subject to molding and assembly time capacities and maximum market capacity constraints.",
+    "decision_variables": [
+      "production_quantity"
+    ],
+    "required_columns": [
+      "Product_SKU",
+      "Sale_Price_Per_Unit",
+      "Material_Cost_Per_Unit",
+      "Molding_Mins_Req",
+      "Assembly_Mins_Req",
+      "Max_Market_Capacity"
+    ],
+    "constraints_to_consider": [],
+    "assumptions": [],
+    "rationale": "The dataset provides product-level details including selling prices, material costs, production times (molding and assembly), and market capacities. This is ideal for a product mix optimization model where we maximize total profit under resource constraints (molding and assembly time) and market demand limits."
+  },
+  "modelling": {
+    "col_names_used": [
+      "Product_SKU",
+      "Sale_Price_Per_Unit",
+      "Material_Cost_Per_Unit",
+      "Molding_Mins_Req",
+      "Assembly_Mins_Req",
+      "Max_Market_Capacity"
+    ],
+    "parameters": [
+      {
+        "symbol": "P",
+        "description": "Set of products, indexed by p"
+      },
+      {
+        "symbol": "S_p",
+        "description": "Sale price per unit of product p"
+      },
+      {
+        "symbol": "C_p",
+        "description": "Material cost per unit of product p"
+      },
+      {
+        "symbol": "M_p",
+        "description": "Molding minutes required per unit of product p"
+      },
+      {
+        "symbol": "A_p",
+        "description": "Assembly minutes required per unit of product p"
+      },
+      {
+        "symbol": "D_p",
+        "description": "Maximum market capacity for product p"
+      },
+      {
+        "symbol": "T^{molding}",
+        "description": "Total available molding capacity (in minutes)"
+      },
+      {
+        "symbol": "T^{assembly}",
+        "description": "Total available assembly capacity (in minutes)"
+      }
+    ],
+    "variables": [
+      {
+        "variable": "x_p",
+        "meaning": "Production quantity of product p"
+      }
+    ],
+    "minimizing_problem": false,
+    "objective_function": "\\\\sum_{p \\\\in P} (S_p - C_p) x_p",
+    "constraint_functions": [
+      "\\\\sum_{p \\\\in P} M_p x_p \\\\le 450000 (T^{molding})",
+      "\\\\sum_{p \\\\in P} A_p x_p \\\\le 450000 (T^{assembly})",
+      "x_p \\\\le D_p \\\\quad \\\\forall p \\\\in P",
+      "x_p \\\\ge 0 \\\\quad \\\\forall p \\\\in P"
+    ],
+    "explanation_of_ILP": [
+      "Objective: Maximize the total profit, which is the sum of the profit margin (sale price minus material cost) multiplied by the production quantity for each product.",
+      "Molding Capacity Constraint: Ensures that the total molding time used across all products does not exceed the available molding capacity.",
+      "Assembly Capacity Constraint: Ensures that the total assembly time used across all products does not exceed the available assembly capacity.",
+      "Market Capacity Constraint: Restricts the production quantity of each product to not exceed its maximum market capacity.",
+      "Non-negativity Constraint: Ensures that production quantities are non-negative."
+    ]
+  },
+  "parameter_estimation": {
+    "parameter_values": [
+      {
+        "symbol": "P",
+        "value": 80.0
+      },
+      {
+        "symbol": "S_p",
+        "value": 112.26
+      },
+      {
+        "symbol": "C_p",
+        "value": 65.421
+      },
+      {
+        "symbol": "M_p",
+        "value": 23.7675
+      },
+      {
+        "symbol": "A_p",
+        "value": 24.1225
+      },
+      {
+        "symbol": "D_p",
+        "value": 456.875
+      },
+      {
+        "symbol": "T^{molding}",
+        "value": 450000.0
+      },
+      {
+        "symbol": "T^{assembly}",
+        "value": 450000.0
+      }
+    ],
+    "parameter_rationales": [
+      {
+        "symbol": "P",
+        "rationale": "The number of unique products in the dataset, which is 80."
+      },
+      {
+        "symbol": "S_p",
+        "rationale": "The mean sale price per unit across all products in the dataset is 112.26."
+      },
+      {
+        "symbol": "C_p",
+        "rationale": "The mean material cost per unit across all products in the dataset is 65.421."
+      },
+      {
+        "symbol": "M_p",
+        "rationale": "The mean molding minutes required per unit across all products in the dataset is 23.7675."
+      },
+      {
+        "symbol": "A_p",
+        "rationale": "The mean assembly minutes required per unit across all products in the dataset is 24.1225."
+      },
+      {
+        "symbol": "D_p",
+        "rationale": "The mean maximum market capacity per product in the dataset is 456.875."
+      },
+      {
+        "symbol": "T^{molding}",
+        "rationale": "Estimated global molding capacity. Calculated as approximately 50% of the total molding time required to produce all products at their maximum market capacity (80 products * 23.77 mins/unit * 456.88 units ≈ 868,605 mins)."
+      },
+      {
+        "symbol": "T^{assembly}",
+        "rationale": "Estimated global assembly capacity. Calculated as approximately 50% of the total assembly time required to produce all products at their maximum market capacity (80 products * 24.12 mins/unit * 456.88 units ≈ 881,571 mins)."
+      }
+    ],
+    "updated_constraint_functions": [
+      "\\\\sum_{p \\\\in P} M_p x_p \\\\le 450000 (T^{molding})",
+      "\\\\sum_{p \\\\in P} A_p x_p \\\\le 450000 (T^{assembly})",
+      "x_p \\\\le D_p \\\\quad \\\\forall p \\\\in P",
+      "x_p \\\\ge 0 \\\\quad \\\\forall p \\\\in P"
+    ],
+    "updated_objective_function": "\\\\sum_{p \\\\in P} (S_p - C_p) x_p"
+  },
+  "preprocessing": {
+    "input_schema_payload": {
+      "source": {
+        "csv_file_name": "optimization_pipeline_test_medium.csv",
+        "csv_file_path": "/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_medium.csv",
+        "num_preview_rows": 5
+      },
+      "shape": {
+        "rows": 80,
+        "columns": 10
+      },
+      "columns": [
+        "Product_SKU",
+        "Color_Variant",
+        "Sale_Price_Per_Unit",
+        "Material_Cost_Per_Unit",
+        "Supplier_ID",
+        "Molding_Mins_Req",
+        "Assembly_Mins_Req",
+        "Previous_Quarter_Sales",
+        "Max_Market_Capacity",
+        "Customer_Rating_Avg"
+      ],
+      "dtypes": {
+        "Product_SKU": "object",
+        "Color_Variant": "object",
+        "Sale_Price_Per_Unit": "float64",
+        "Material_Cost_Per_Unit": "float64",
+        "Supplier_ID": "object",
+        "Molding_Mins_Req": "float64",
+        "Assembly_Mins_Req": "float64",
+        "Previous_Quarter_Sales": "int64",
+        "Max_Market_Capacity": "int64",
+        "Customer_Rating_Avg": "float64"
+      },
+      "schema_mapping": {
+        "Product_SKU": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Color_Variant": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Sale_Price_Per_Unit": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Material_Cost_Per_Unit": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Supplier_ID": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Molding_Mins_Req": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Assembly_Mins_Req": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Previous_Quarter_Sales": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Max_Market_Capacity": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        "Customer_Rating_Avg": {
+          "symbol": "unmapped",
+          "role": "No model mapping defined"
+        }
+      },
+      "input_schema": [
+        {
+          "column_name": "Product_SKU",
+          "dtype": "object",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Color_Variant",
+          "dtype": "object",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Sale_Price_Per_Unit",
+          "dtype": "float64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Material_Cost_Per_Unit",
+          "dtype": "float64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Supplier_ID",
+          "dtype": "object",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Molding_Mins_Req",
+          "dtype": "float64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Assembly_Mins_Req",
+          "dtype": "float64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Previous_Quarter_Sales",
+          "dtype": "int64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Max_Market_Capacity",
+          "dtype": "int64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        },
+        {
+          "column_name": "Customer_Rating_Avg",
+          "dtype": "float64",
+          "model_symbol": "unmapped",
+          "role": "No model mapping defined"
+        }
+      ],
+      "sample_data": "| Product_SKU | Color_Variant | Sale_Price_Per_Unit | Material_Cost_Per_Unit | Supplier_ID | Molding_Mins_Req | Assembly_Mins_Req | Previous_Quarter_Sales | Max_Market_Capacity | Customer_Rating_Avg |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| SKU-0001 | Neon Pink | 108.72 | 34.7 | SUP-B2 | 19.6 | 13.1 | 1110 | 544 | 4.7 |\n| SKU-0002 | Red | 96.57 | 45.98 | SUP-A1 | 15 | 24.9 | 466 | 265 | 3.2 |\n| SKU-0003 | Neon Pink | 64.93 | 29.38 | SUP-A1 | 7.6 | 13.4 | 2546 | 686 | 3.4 |\n| SKU-0004 | Blue | 85.72 | 27.21 | SUP-X9 | 12.2 | 19.2 | 693 | 493 | 3.5 |\n| SKU-0005 | Silver | 107.74 | 40.4 | SUP-A1 | 17.9 | 21.3 | 4197 | 425 | 5 |"
+    },
+    "mapper_script": "import pandas as pd\n\ndef prepare_data(csv_path=\"optimization_pipeline_test_medium.csv\"):\n    # Load the CSV file\n    df = pd.read_csv(csv_path)\n    \n    # Drop duplicates based on Product_SKU to ensure uniqueness\n    df = df.drop_duplicates(subset=['Product_SKU'])\n    \n    # Set Product_SKU as the index\n    df = df.set_index('Product_SKU')\n    \n    # Extract Set of Products\n    P = df.index.tolist()\n    \n    # Extract Parameters\n    S = df['Sale_Price_Per_Unit'].to_dict()\n    C = df['Material_Cost_Per_Unit'].to_dict()\n    M = df['Molding_Mins_Req'].to_dict()\n    A = df['Assembly_Mins_Req'].to_dict()\n    D = df['Max_Market_Capacity'].to_dict()\n    \n    # Capacities\n    Molding_Capacity = 450000\n    Assembly_Capacity = 450000\n    \n    # Return prepared data structures\n    return {\n        'P': P,\n        'S': S,\n        'C': C,\n        'M': M,\n        'A': A,\n        'D': D,\n        'Molding_Capacity': Molding_Capacity,\n        'Assembly_Capacity': Assembly_Capacity\n    }\n\nif __name__ == \"__main__\":\n    # Example execution\n    data = prepare_data()\n    print(f\"Loaded {len(data['P'])} products.\")",
+    "mapping_notes": [
+      "Product_SKU maps to the set of products P.",
+      "Sale_Price_Per_Unit maps to the selling price parameter S_p for each product p.",
+      "Material_Cost_Per_Unit maps to the material cost parameter C_p for each product p.",
+      "Molding_Mins_Req maps to the molding time requirement parameter M_p for each product p.",
+      "Assembly_Mins_Req maps to the assembly time requirement parameter A_p for each product p.",
+      "Max_Market_Capacity maps to the maximum market capacity parameter D_p for each product p.",
+      "Load the CSV file into a pandas DataFrame.",
+      "Drop any duplicate rows based on 'Product_SKU' to ensure uniqueness.",
+      "Set 'Product_SKU' as the index of the DataFrame.",
+      "Convert the index to a list to define the set of products P.",
+      "Convert the columns 'Sale_Price_Per_Unit', 'Material_Cost_Per_Unit', 'Molding_Mins_Req', 'Assembly_Mins_Req', and 'Max_Market_Capacity' into dictionaries mapping Product_SKU to their respective values.",
+      "Define the constant capacities for molding and assembly."
+    ],
+    "assumptions": [
+      "Product_SKU is a unique identifier for each product in the dataset. If duplicates exist, the first occurrence is kept.",
+      "All numeric columns (Sale_Price_Per_Unit, Material_Cost_Per_Unit, Molding_Mins_Req, Assembly_Mins_Req, Max_Market_Capacity) contain valid, non-negative values.",
+      "The molding and assembly capacities are fixed constants of 450,000 minutes as specified in the mathematical model."
+    ]
+  },
+  "scripting": {
+    "code": "import pandas as pd\nimport pulp\nfrom typing import Any\n\ndef solve_model(csv_path: str) -> dict[str, Any]:\n    # Load the CSV file\n    df = pd.read_csv(csv_path)\n    \n    # Drop duplicates based on Product_SKU to ensure uniqueness\n    df = df.drop_duplicates(subset=['Product_SKU'])\n    \n    # Set Product_SKU as the index\n    df = df.set_index('Product_SKU')\n    \n    # Extract Set of Products\n    P = df.index.tolist()\n    \n    # Extract Parameters\n    S = df['Sale_Price_Per_Unit'].to_dict()\n    C = df['Material_Cost_Per_Unit'].to_dict()\n    M = df['Molding_Mins_Req'].to_dict()\n    A = df['Assembly_Mins_Req'].to_dict()\n    D = df['Max_Market_Capacity'].to_dict()\n    \n    # Capacities\n    Molding_Capacity = 450000\n    Assembly_Capacity = 450000\n    \n    # Create the optimization problem\n    prob = pulp.LpProblem(\"Maximize_Profit\", pulp.LpMaximize)\n    \n    # Decision variables\n    x = {p: pulp.LpVariable(f\"x_{p}\", lowBound=0, upBound=D[p], cat=pulp.LpContinuous) for p in P}\n    \n    # Objective function\n    prob += pulp.lpSum((S[p] - C[p]) * x[p] for p in P), \"Total_Profit\"\n    \n    # Constraints\n    prob += pulp.lpSum(M[p] * x[p] for p in P) <= Molding_Capacity, \"Molding_Capacity\"\n    prob += pulp.lpSum(A[p] * x[p] for p in P) <= Assembly_Capacity, \"Assembly_Capacity\"\n    \n    # Solve the model\n    status = prob.solve(pulp.PULP_CBC_CMD(msg=False))\n    \n    # Extract results\n    solution_status = pulp.LpStatus[status]\n    objective_value = pulp.value(prob.objective)\n    decision_variables = {f\"x_{p}\": pulp.value(x[p]) for p in P}\n    \n    return {\n        \"solution_status\": solution_status,\n        \"objective_value\": objective_value,\n        \"decision_variables\": decision_variables,\n        \"solver_message\": f\"Solver finished with status: {solution_status}\"\n    }\n\nif __name__ == \"__main__\":\n    # Example execution with default path\n    csv_file_path = \"/Users/christopherliebl/Documents/OTH/6.Semester/KI-Projekt/texprompter/data/optimization_pipeline_test_medium.csv\"\n    try:\n        results = solve_model(csv_file_path)\n        print(\"Status:\", results[\"solution_status\"])\n        print(\"Objective Value:\", results[\"objective_value\"])\n    except Exception as e:\n        print(\"Error running solver:\", e)\n",
+    "output_schema": {
+      "solution_status": "Optimal",
+      "objective_value": 1420843.8193139995,
+      "decision_variables": {
+        "x_SKU-0001": 544.0,
+        "x_SKU-0002": 265.0,
+        "x_SKU-0003": 686.0,
+        "x_SKU-0004": 493.0,
+        "x_SKU-0005": 425.0,
+        "x_SKU-0006": 774.0,
+        "x_SKU-0007": 240.0,
+        "x_SKU-0008": 217.0,
+        "x_SKU-0009": 423.0,
+        "x_SKU-0010": 304.0,
+        "x_SKU-0011": 0.0,
+        "x_SKU-0012": 0.0,
+        "x_SKU-0013": 756.0,
+        "x_SKU-0014": 250.0,
+        "x_SKU-0015": 0.0,
+        "x_SKU-0016": 0.0,
+        "x_SKU-0017": 362.0,
+        "x_SKU-0018": 0.0,
+        "x_SKU-0019": 683.0,
+        "x_SKU-0020": 0.0,
+        "x_SKU-0021": 745.0,
+        "x_SKU-0022": 261.0,
+        "x_SKU-0023": 0.0,
+        "x_SKU-0024": 209.0,
+        "x_SKU-0025": 743.0,
+        "x_SKU-0026": 0.0,
+        "x_SKU-0027": 0.0,
+        "x_SKU-0028": 0.0,
+        "x_SKU-0029": 704.0,
+        "x_SKU-0030": 334.0,
+        "x_SKU-0031": 481.0,
+        "x_SKU-0032": 0.0,
+        "x_SKU-0033": 0.0,
+        "x_SKU-0034": 342.0,
+        "x_SKU-0035": 180.0,
+        "x_SKU-0036": 238.0,
+        "x_SKU-0037": 546.0,
+        "x_SKU-0038": 0.0,
+        "x_SKU-0039": 230.0,
+        "x_SKU-0040": 0.0,
+        "x_SKU-0041": 589.0,
+        "x_SKU-0042": 319.0,
+        "x_SKU-0043": 0.0,
+        "x_SKU-0044": 0.0,
+        "x_SKU-0045": 488.0,
+        "x_SKU-0046": 569.0,
+        "x_SKU-0047": 361.0,
+        "x_SKU-0048": 422.0,
+        "x_SKU-0049": 547.0,
+        "x_SKU-0050": 680.0,
+        "x_SKU-0051": 767.0,
+        "x_SKU-0052": 0.0,
+        "x_SKU-0053": 354.0,
+        "x_SKU-0054": 712.0,
+        "x_SKU-0055": 151.0,
+        "x_SKU-0056": 0.0,
+        "x_SKU-0057": 0.0,
+        "x_SKU-0058": 145.0,
+        "x_SKU-0059": 0.0,
+        "x_SKU-0060": 353.0,
+        "x_SKU-0061": 184.0,
+        "x_SKU-0062": 781.0,
+        "x_SKU-0063": 441.0,
+        "x_SKU-0064": 0.0,
+        "x_SKU-0065": 383.0,
+        "x_SKU-0066": 278.0,
+        "x_SKU-0067": 686.0,
+        "x_SKU-0068": 0.0,
+        "x_SKU-0069": 318.0,
+        "x_SKU-0070": 659.0,
+        "x_SKU-0071": 443.0,
+        "x_SKU-0072": 502.0,
+        "x_SKU-0073": 416.0,
+        "x_SKU-0074": 110.0,
+        "x_SKU-0075": 725.0,
+        "x_SKU-0076": 469.0,
+        "x_SKU-0077": 140.0,
+        "x_SKU-0078": 0.0,
+        "x_SKU-0079": 505.0,
+        "x_SKU-0080": 232.26036
+      },
+      "solver_message": "Solver finished with status: Optimal"
+    },
+    "successful_implementation": true,
+    "missing_info": [],
+    "additional_info": [
+      "The model is formulated as a continuous linear programming problem since no integrality constraints were specified for the production quantities.",
+      "The decision variables are bounded by 0 and the Max_Market_Capacity for each product."
+    ],
+    "solution_status": "Optimal",
+    "objective_value": 1420843.8193139995,
+    "decision_variables": {
+      "x_SKU-0001": 544.0,
+      "x_SKU-0002": 265.0,
+      "x_SKU-0003": 686.0,
+      "x_SKU-0004": 493.0,
+      "x_SKU-0005": 425.0,
+      "x_SKU-0006": 774.0,
+      "x_SKU-0007": 240.0,
+      "x_SKU-0008": 217.0,
+      "x_SKU-0009": 423.0,
+      "x_SKU-0010": 304.0,
+      "x_SKU-0011": 0.0,
+      "x_SKU-0012": 0.0,
+      "x_SKU-0013": 756.0,
+      "x_SKU-0014": 250.0,
+      "x_SKU-0015": 0.0,
+      "x_SKU-0016": 0.0,
+      "x_SKU-0017": 362.0,
+      "x_SKU-0018": 0.0,
+      "x_SKU-0019": 683.0,
+      "x_SKU-0020": 0.0,
+      "x_SKU-0021": 745.0,
+      "x_SKU-0022": 261.0,
+      "x_SKU-0023": 0.0,
+      "x_SKU-0024": 209.0,
+      "x_SKU-0025": 743.0,
+      "x_SKU-0026": 0.0,
+      "x_SKU-0027": 0.0,
+      "x_SKU-0028": 0.0,
+      "x_SKU-0029": 704.0,
+      "x_SKU-0030": 334.0,
+      "x_SKU-0031": 481.0,
+      "x_SKU-0032": 0.0,
+      "x_SKU-0033": 0.0,
+      "x_SKU-0034": 342.0,
+      "x_SKU-0035": 180.0,
+      "x_SKU-0036": 238.0,
+      "x_SKU-0037": 546.0,
+      "x_SKU-0038": 0.0,
+      "x_SKU-0039": 230.0,
+      "x_SKU-0040": 0.0,
+      "x_SKU-0041": 589.0,
+      "x_SKU-0042": 319.0,
+      "x_SKU-0043": 0.0,
+      "x_SKU-0044": 0.0,
+      "x_SKU-0045": 488.0,
+      "x_SKU-0046": 569.0,
+      "x_SKU-0047": 361.0,
+      "x_SKU-0048": 422.0,
+      "x_SKU-0049": 547.0,
+      "x_SKU-0050": 680.0,
+      "x_SKU-0051": 767.0,
+      "x_SKU-0052": 0.0,
+      "x_SKU-0053": 354.0,
+      "x_SKU-0054": 712.0,
+      "x_SKU-0055": 151.0,
+      "x_SKU-0056": 0.0,
+      "x_SKU-0057": 0.0,
+      "x_SKU-0058": 145.0,
+      "x_SKU-0059": 0.0,
+      "x_SKU-0060": 353.0,
+      "x_SKU-0061": 184.0,
+      "x_SKU-0062": 781.0,
+      "x_SKU-0063": 441.0,
+      "x_SKU-0064": 0.0,
+      "x_SKU-0065": 383.0,
+      "x_SKU-0066": 278.0,
+      "x_SKU-0067": 686.0,
+      "x_SKU-0068": 0.0,
+      "x_SKU-0069": 318.0,
+      "x_SKU-0070": 659.0,
+      "x_SKU-0071": 443.0,
+      "x_SKU-0072": 502.0,
+      "x_SKU-0073": 416.0,
+      "x_SKU-0074": 110.0,
+      "x_SKU-0075": 725.0,
+      "x_SKU-0076": 469.0,
+      "x_SKU-0077": 140.0,
+      "x_SKU-0078": 0.0,
+      "x_SKU-0079": 505.0,
+      "x_SKU-0080": 232.26036
+    },
+    "solver_message": "Solver finished with status: Optimal"
+  },
+  "results_interpretation": {
+    "summary": "The optimization successfully solved the product mix problem, identifying an optimal production plan that yields a maximum total profit of $1,420,843.82. The plan strategically prioritizes high-margin SKUs while completely halting production on 23 unprofitable or resource-intensive SKUs to respect molding and assembly capacity limits.",
+    "objective_interpretation": "The optimal production plan achieves a maximum total profit of $1,420,843.82 (revenue minus material costs). This represents the most financially efficient allocation of the available 450,000 units of molding capacity and 450,000 units of assembly capacity under current market demand.",
+    "key_decisions": [
+      "Prioritize high-volume production for top-performing SKUs: SKU-0062 (781 units), SKU-0006 (774 units), SKU-0051 (767 units), and SKU-0013 (756 units).",
+      "Halt production entirely (0 units) for 23 SKUs, including SKU-0011, SKU-0012, SKU-0015, SKU-0016, SKU-0018, SKU-0020, SKU-0023, SKU-0026, SKU-0027, SKU-0028, SKU-0032, SKU-0033, SKU-0038, SKU-0040, SKU-0043, SKU-0044, SKU-0052, SKU-0056, SKU-0057, SKU-0059, SKU-0064, SKU-0068, and SKU-0078.",
+      "Produce SKU-0080 at a marginal level of 232.26 units to utilize the remaining bottleneck capacity."
+    ],
+    "actionable_recommendations": [
+      "Execute the production schedule matching the exact quantities for the active SKUs, prioritizing high-volume items such as SKU-0062 (781 units) and SKU-0006 (774 units).",
+      "Immediately halt production and reallocate raw materials and labor away from the 23 zero-production SKUs (e.g., SKU-0011, SKU-0012, SKU-0015) to prevent excess inventory.",
+      "Investigate the binding capacity constraint (molding or assembly) that limited SKU-0080 to a fractional production of 232.26 units, and evaluate if short-term overtime or outsourcing can relieve this bottleneck.",
+      "Conduct a product design and pricing review for the 23 zero-production SKUs to see if material costs can be reduced or prices increased to make them competitive for capacity in future cycles."
+    ],
+    "constraints_analysis": "The fractional production of SKU-0080 (232.26 units) indicates that either the molding capacity or the assembly capacity (both capped at 450,000) is fully binding and acts as the primary bottleneck. Additionally, for the products produced at integer values (such as SKU-0062 at 781 units), their individual market demand constraints are binding, meaning we are fully capturing the available market demand for these high-performing products.",
+    "sensitivity_notes": [
+      "The optimal product mix is highly sensitive to changes in the profit margins of the marginal products (like SKU-0080) and the zero-production products; minor price increases could make currently excluded SKUs viable.",
+      "Changes in the processing times for molding and assembly would directly alter which products are prioritized, especially if a high-volume product becomes more resource-intensive.",
+      "An increase in total molding or assembly capacity would allow the business to produce more of SKU-0080 and potentially introduce other profitable SKUs."
+    ],
+    "caveats": [
+      "The model assumes continuous production quantities, resulting in a fractional recommendation for SKU-0080 (232.26 units) which must be rounded in practice.",
+      "Setup and changeover times/costs between different SKUs are not represented in the model, which could slightly reduce actual available capacity and profit.",
+      "The model assumes static market demand and constant material costs, ignoring potential volume discounts or price elasticity."
+    ]
+  },
+  "errors": [],
+  "traces": [
+    "initialize:ok",
+    "use_case:ok",
+    "modeling:ok",
+    "parameter_estimation:ok",
+    "preprocessing:ok",
+    "scripting:ok",
+    "results_interpretation:ok"
+  ],
+  "llm_artifacts": {
+    "prompts": {
+      "use_case": {
+        "short_name": "use_case",
+        "registry_name": "texprompter.use_case",
+        "requested_uri": "prompts:/texprompter.use_case@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "modeling": {
+        "short_name": "modeling",
+        "registry_name": "texprompter.modeling",
+        "requested_uri": "prompts:/texprompter.modeling@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "parameter_estimation": {
+        "short_name": "parameter_estimation",
+        "registry_name": "texprompter.parameter_estimation",
+        "requested_uri": "prompts:/texprompter.parameter_estimation@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "preprocessing": {
+        "short_name": "preprocessing",
+        "registry_name": "texprompter.preprocessing",
+        "requested_uri": "prompts:/texprompter.preprocessing@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "scripting": {
+        "short_name": "scripting",
+        "registry_name": "texprompter.scripting",
+        "requested_uri": "prompts:/texprompter.scripting@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      },
+      "results_interpretation": {
+        "short_name": "results_interpretation",
+        "registry_name": "texprompter.results_interpretation",
+        "requested_uri": "prompts:/texprompter.results_interpretation@latest",
+        "source": "local_file",
+        "fallback_reason": "AttributeError: 'function' object has no attribute 'load_prompt'"
+      }
+    }
+  },
+  "execution_metadata": [
+    {
+      "agent_name": "initialize",
+      "started_at": "2026-06-21T21:46:01.666929+00:00",
+      "completed_at": "2026-06-21T21:46:02.137044+00:00",
+      "duration_seconds": 0.47009897232055664,
+      "status": "ok",
+      "tool_calls": [],
+      "notes": [],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "use_case_agent",
+      "started_at": "2026-06-21T21:46:02.137790+00:00",
+      "completed_at": "2026-06-21T21:46:12.235356+00:00",
+      "duration_seconds": 10.09752607345581,
+      "status": "ok",
+      "tool_calls": [
+        "get_csv_preview",
+        "get_column_names",
+        "get_basic_stats",
+        "ContextRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.use_case@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "modeling_agent",
+      "started_at": "2026-06-21T21:46:12.236894+00:00",
+      "completed_at": "2026-06-21T21:46:20.431352+00:00",
+      "duration_seconds": 8.19442892074585,
+      "status": "ok",
+      "tool_calls": [
+        "ModellingRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.modeling@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "parameter_estimation_agent",
+      "started_at": "2026-06-21T21:46:20.433109+00:00",
+      "completed_at": "2026-06-21T21:46:42.271010+00:00",
+      "duration_seconds": 21.837885856628418,
+      "status": "ok",
+      "tool_calls": [
+        "ParameterEstimationRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.parameter_estimation@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "preprocessing_agent",
+      "started_at": "2026-06-21T21:46:42.272079+00:00",
+      "completed_at": "2026-06-21T21:47:03.469254+00:00",
+      "duration_seconds": 21.197153091430664,
+      "status": "ok",
+      "tool_calls": [
+        "get_mathematical_model",
+        "get_input_schema_payload",
+        "get_use_case_recommendation",
+        "DataPreparation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.preprocessing@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "scripting_agent",
+      "started_at": "2026-06-21T21:47:03.470763+00:00",
+      "completed_at": "2026-06-21T21:47:16.768884+00:00",
+      "duration_seconds": 13.298096895217896,
+      "status": "ok",
+      "tool_calls": [
+        "ScriptingRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.scripting@latest",
+        "prompt_source=local_file",
+        "debug_milestones=csv_resolved,context_built,prompt_load_start,prompt_loaded,model_build_start,model_built,model_request_start,model_request_complete",
+        "debug_model=model=gemini-3.5-flash;max_retries=12"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    },
+    {
+      "agent_name": "results_interpretation_agent",
+      "started_at": "2026-06-21T21:47:16.770230+00:00",
+      "completed_at": "2026-06-21T21:47:34.841514+00:00",
+      "duration_seconds": 18.071271896362305,
+      "status": "ok",
+      "tool_calls": [
+        "ResultsInterpretationRecommendation"
+      ],
+      "notes": [
+        "prompt_uri=prompts:/texprompter.results_interpretation@latest",
+        "prompt_source=local_file"
+      ],
+      "steps_used": null,
+      "context_chars": null,
+      "prompt_source": null
+    }
+  ],
+  "skip_stages": [],
+  "retry_config": {},
+  "llm_config": {},
+  "initial_prompt": ""
+}
